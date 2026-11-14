@@ -166,12 +166,14 @@ function surfZ(ctx, x, y, front) {
   const ax = Math.abs(x);
   for (let i = 0; i <= steps; i++) {
     const t = front ? (i / steps) * 0.35 : 1 - (i / steps) * 0.35;
-    if (ctx.halfWAt(t, y) >= ax) {
+    const wt = ctx.halfWAt(t, y);
+    if (wt > 0.0005 && wt >= ax) {
       if (i === 0) return ctx.z(t);
       let a = prev, b = t;
       for (let k = 0; k < 10; k++) {
         const m = (a + b) / 2;
-        if (ctx.halfWAt(m, y) >= ax) b = m;
+        const wm = ctx.halfWAt(m, y);
+        if (wm > 0.0005 && wm >= ax) b = m;
         else a = m;
       }
       return ctx.z(b);
@@ -208,6 +210,9 @@ function loftBody(ctx, trimH = 0.06, hi = true) {
   for (const p of half) ring.push([p[0], p[1]]);
   for (let i = half.length - 2; i >= 1; i--) ring.push([-half[i][0], half[i][1]]);
   const R = ring.length;
+  // tag the wheel-well inner wall (floor edge = 1, top of wall = 2) so it can follow the tyres' inner faces
+  const wallTag = ring.map(([x, y]) => (Math.abs(Math.abs(x) - (xc - 0.004)) < 1e-6 && y === 0 ? 1 : Math.abs(Math.abs(x) - (xc + 0.012)) < 1e-6 && y === 0.002 ? 2 : 0));
+  const xInnerAbs = ctx.track / 2 - ctx.tw / 2 - 0.03;
   const pos = new Float32Array(ts.length * R * 3);
   const fenderT = 0.065;
   for (let i = 0; i < ts.length; i++) {
@@ -218,12 +223,16 @@ function loftBody(ctx, trimH = 0.06, hi = true) {
       const dz = zz - za;
       if (Math.abs(dz) < ctx.archR) archY = Math.max(archY, ctx.wr + Math.sqrt(ctx.archR * ctx.archR - dz * dz) - ctx.lower);
     }
+    let nearArch = false;
+    for (const za of [ctx.zf, ctx.zr]) if (Math.abs(zz - za) < ctx.archR * 1.2) nearArch = true;
+    const xcS = clamp(xInnerAbs / Math.max(0.3, w), 0.3, 0.97);
     for (let j = 0; j < R; j++) {
       const o = (i * R + j) * 3;
-      const [xn, yn] = ring[j];
+      let [xn, yn] = ring[j];
+      if (nearArch && wallTag[j]) xn = Math.sign(xn) * (wallTag[j] === 1 ? Math.min(xc - 0.004, xcS - 0.004) : Math.min(xc + 0.012, xcS + 0.012));
       let y = b0 + yn * (t0 - b0) - ctx.lower;
       if (yn > s) y -= ctx.dip(t, xn) * Math.min(1, (yn - s) / (1 - s) * 2.5);
-      if (Math.abs(xn) > xc && archY > -1) {
+      if (Math.abs(xn) > Math.min(xc, xcS) && wallTag[j] !== 1 && archY > -1) {
         if (yn <= s + 1e-4) y = Math.max(y, archY);
         else y = Math.max(y, archY + fenderT * (0.6 + 0.4 * Math.min(1, (Math.abs(xn) - xc) / 0.15)));
       }
@@ -805,13 +814,16 @@ export function carParts(def, custom = {}, hi = true) {
 
   // ---- Badges, side markers, third brake light
   if (hi) {
-    const by = grille === 'kidney' ? gy + 0.23 : grille === 'wide' ? gy + 0.07 : hy + 0.02;
-    const bz = surfZ(ctx, 0, by, true);
-    if (bz !== null) {
-      const n = faceNormal(ctx, true, 0, by);
+    // front badge: ray-cast onto the real body surface (accounts for the bonnet dip)
+    const by = grille === 'kidney' ? gy + 0.215 : grille === 'wide' ? gy + 0.07 : hy - 0.03;
+    const ray = new THREE.Raycaster(new THREE.Vector3(0, by - low, -L), new THREE.Vector3(0, 0, 1), 0, L * 2);
+    const hit = ray.intersectObject(new THREE.Mesh(bp, new THREE.MeshBasicMaterial({ side: THREE.DoubleSide })))[0];
+    if (hit && hit.face) {
+      const n = hit.face.normal.clone();
+      if (n.z > 0) n.negate();
       const e = new THREE.CircleGeometry(1, 20).scale(0.05, 0.03, 1);
       e.applyQuaternion(new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 0, 1), n));
-      S.chrome.push(e.translate(n.x * 0.009, by - low + n.y * 0.009, bz + n.z * 0.009));
+      S.chrome.push(e.translate(hit.point.x + n.x * 0.006, hit.point.y + n.y * 0.006, hit.point.z + n.z * 0.006));
     }
     const rbY = ty + (tailStyle === 'bar' ? 0.07 : 0.0);
     S.chrome.push(faceDecal(ctx, false, rectQuad(-0.06, 0.06, rbY - 0.012, rbY + 0.012), 0.009, 2, 1));
@@ -823,8 +835,9 @@ export function carParts(def, custom = {}, hi = true) {
     if (b.cabin && b.cabin.t3 < 0.995) {
       const c = b.cabin;
       // high-mount stop lamp on the trailing edge of the roof
-      S.decal.push(new THREE.BoxGeometry(0.3, 0.022, 0.05).translate(0, c.roof - low + 0.008, ctx.z(c.t2) + 0.012));
-      S.tail.push(new THREE.BoxGeometry(0.26, 0.012, 0.004).translate(0, c.roof - low + 0.008, ctx.z(c.t2) + 0.038));
+      const rTop = c.roof + (c.crown ?? 0.03) - low;
+      S.decal.push(new THREE.BoxGeometry(0.3, 0.022, 0.05).translate(0, rTop + 0.004, ctx.z(c.t2) + 0.012));
+      S.tail.push(new THREE.BoxGeometry(0.26, 0.012, 0.004).translate(0, rTop + 0.004, ctx.z(c.t2) + 0.038));
     }
   }
 
@@ -920,12 +933,17 @@ export function carParts(def, custom = {}, hi = true) {
     sy += Math.min(0, roomTop - (sy + 0.44));
     const ix = ctx.hw(tc) * 0.42;
     both((sx) => {
-      S.interior.push(roundBox(0.48, 0.58, 0.13, 0.05).rotateX(-0.2).translate(sx * ix, sy - 0.05, seatZ + 0.12));
-      S.interior.push(roundBox(0.25, 0.17, 0.1, 0.04).translate(sx * ix, sy + 0.32, seatZ + 0.18));
-      S.interior.push(roundBox(0.48, 0.12, 0.48, 0.04).translate(sx * ix, sy - 0.36, seatZ - 0.16));
+      S.interior.push(roundBox(0.48, 0.6, 0.13, 0.05).rotateX(0.2).translate(sx * ix, sy - 0.07, seatZ + 0.12));
+      S.interior.push(roundBox(0.25, 0.16, 0.1, 0.04).translate(sx * ix, sy + 0.3, seatZ + 0.19));
+      for (const px of [-0.06, 0.06]) S.interior.push(new THREE.CylinderGeometry(0.008, 0.008, 0.12, 6).translate(sx * ix + px, sy + 0.2, seatZ + 0.18));
+      S.interior.push(roundBox(0.48, 0.14, 0.5, 0.04).translate(sx * ix, sy - 0.35, seatZ - 0.14));
+      S.interior.push(new THREE.BoxGeometry(0.36, Math.max(0.05, sy - 0.42 - (ctx.bot((c.t1 + c.t2) / 2) - low)), 0.36).translate(sx * ix, (sy - 0.42 + ctx.bot((c.t1 + c.t2) / 2) - low) / 2, seatZ - 0.14));
     });
     if (def.seats !== 2 && c.t2 - c.t1 > 0.16) {
-      S.interior.push(roundBox(W * 0.62, 0.48, 0.14, 0.05).rotateX(-0.25).translate(0, sy - 0.12, seatZ + 0.78));
+      S.interior.push(roundBox(W * 0.62, 0.48, 0.14, 0.05).rotateX(0.22).translate(0, sy - 0.12, seatZ + 0.78));
+      S.interior.push(roundBox(W * 0.62, 0.14, 0.42, 0.04).translate(0, sy - 0.38, seatZ + 0.56));
+      const yFloor = ctx.bot((c.t1 + c.t2) / 2) - low;
+      S.interior.push(new THREE.BoxGeometry(W * 0.5, Math.max(0.05, sy - 0.45 - yFloor), 0.36).translate(0, (sy - 0.45 + yFloor) / 2, seatZ + 0.56));
     }
     // dashboard and steering wheel silhouettes
     const tDash = c.t0 + 0.035;
@@ -944,7 +962,11 @@ export function carParts(def, custom = {}, hi = true) {
   const yfb = b.bottom[0][1];
   if (kit !== 'stock') {
     const agg = kit === 'aggressive' || kit === 'wide';
-    S.kit.push(outlinePlate(ctx, true, yfb - 0.004, W * (agg ? 0.46 : 0.42), agg ? 0.07 : 0.035, 0.32, 0.02));
+    // splitter hangs under the lowest edge of the front bumper and reaches just past its face
+    let yLow = Infinity;
+    for (let t = 0.0; t <= 0.09; t += 0.005) yLow = Math.min(yLow, ctx.bot(t));
+    const ySp = Math.max(yLow + 0.012, Math.min(yfb - 0.004, yLow + 0.06));
+    S.kit.push(outlinePlate(ctx, true, ySp, W * (agg ? 0.46 : 0.42), agg ? 0.07 : 0.035, 0.32, 0.02));
     const skirtLen = ctx.zr - ctx.zf - ctx.archR * 2 - 0.08;
     both((sx) => {
       const t = (ctx.tFA + ctx.tRA) / 2;
@@ -974,7 +996,7 @@ export function carParts(def, custom = {}, hi = true) {
   if (b.scoop) {
     const t = b.scoop;
     S.paint.push(new THREE.SphereGeometry(1, 12, 6, 0, Math.PI * 2, 0, Math.PI / 2).scale(0.26, 0.06, 0.2).translate(0, ctx.top(t) - low - ctx.dip(t, 0) - 0.005, ctx.z(t)));
-    S.decal.push(new THREE.PlaneGeometry(0.34, 0.04).rotateX(-0.25).translate(0, ctx.top(t) - low - ctx.dip(t, 0) + 0.025, ctx.z(t) - 0.17));
+    S.decal.push(new THREE.CircleGeometry(1, 20, 0, Math.PI).scale(0.17, 0.042, 1).rotateY(Math.PI).translate(0, ctx.top(t) - low - ctx.dip(t, 0) - 0.004, ctx.z(t) - 0.15));
   }
   // ---- Spoilers
   const sp = custom.spoiler ?? b.spoiler ?? 'none';
@@ -1053,7 +1075,11 @@ export function truckParts(def) {
     }
   }
   const cz0 = zFront + 0.25 + hoodL;
+  const frameTop = 0.875;
   S.paint.push(box(W, cabH - 1.0, cabL, 0, 1.0 + (cabH - 1.0) / 2, cz0 + cabL / 2));
+  // cab floor / steps down to the frame so the cab doesn't hover
+  S.trim.push(box(W * 0.94, 1.0 - frameTop + 0.02, cabL * 0.96, 0, (1.0 + frameTop) / 2, cz0 + cabL / 2));
+  for (const sx of [-1, 1]) S.chrome.push(box(0.12, 0.03, cabL * 0.35, sx * (W * 0.47 + 0.04), 0.85, cz0 + cabL * 0.35));
   S.glass.push(box(W * 0.9, 0.85, 0.04, 0, cabH - 0.65, cz0 - 0.005));
   for (const sx of [-1, 1]) S.glass.push(box(0.04, 0.6, cabL * 0.45, sx * (W / 2 + 0.001), cabH - 0.62, cz0 + cabL * 0.3));
   if (b.fairing) S.paint.push(box(W * 0.95, b.fairing, cabL * 0.7, 0, cabH + b.fairing / 2, cz0 + cabL * 0.55));
@@ -1066,13 +1092,18 @@ export function truckParts(def) {
     lamps.head.push([sx * lx, ly, zFront + 0.18]);
     // mirror on an arm
     S.trim.push(box(0.16, 0.03, 0.03, sx * (W / 2 + 0.07), cabH - 0.45, cz0 + 0.1));
-    S.trim.push(box(0.06, 0.4, 0.22, sx * (W / 2 + 0.16), cabH - 0.6, cz0 + 0.1));
+    S.trim.push(box(0.06, 0.4, 0.22, sx * (W / 2 + 0.145), cabH - 0.6, cz0 + 0.1));
   }
   // cargo
   const cargoZ0 = b.cargoZ0 ?? (cz0 + cabL + 0.15);
   const cargoL = L / 2 - cargoZ0;
   const floor = b.cargoFloor ?? 1.05;
   S.body2.push(box(W, b.H - floor, cargoL, 0, floor + (b.H - floor) / 2, cargoZ0 + cargoL / 2));
+  // subframe rails and cross-members between the frame and the cargo floor
+  for (const sx of [-1, 1]) S.trim.push(box(0.14, floor - frameTop + 0.02, cargoL - 0.2, sx * 0.42, (floor + frameTop) / 2, cargoZ0 + cargoL / 2));
+  for (let z = cargoZ0 + 0.4; z < L / 2 - 0.3; z += 0.9) S.trim.push(box(W * 0.9, 0.08, 0.08, 0, floor - 0.05, z));
+  // axles join each wheel set to the frame
+  for (const a of b.axles || []) S.trim.push(new THREE.CylinderGeometry(0.07, 0.07, W - 0.3, 10).rotateZ(Math.PI / 2).translate(0, b.wr, a.z));
   S.trim.push(box(W * 0.98, 0.12, 0.05, 0, floor - 0.05, L / 2 - 0.01));
   for (const sx of [-1, 1]) {
     S.tail.push(box(0.2, 0.1, 0.04, sx * (W / 2 - 0.2), floor - 0.12, L / 2 + 0.01));
@@ -1082,7 +1113,10 @@ export function truckParts(def) {
     // side guards
     S.trim.push(box(0.04, 0.4, cargoL * 0.45, sx * (W / 2 - 0.05), 0.75, cargoZ0 + cargoL * 0.35));
   }
-  S.plate.push(new THREE.PlaneGeometry(0.31, 0.155).translate(0, floor - 0.3, L / 2 + 0.02));
+  // rear under-run bar on brackets, plate mounted on it
+  S.trim.push(box(W * 0.9, 0.12, 0.1, 0, 0.62, L / 2 - 0.12));
+  for (const sx of [-1, 1]) S.trim.push(box(0.08, floor - 0.62, 0.08, sx * 0.5, (floor + 0.62) / 2, L / 2 - 0.14));
+  S.plate.push(new THREE.PlaneGeometry(0.31, 0.155).translate(0, 0.62, L / 2 - 0.065));
   if (b.stacks) for (const sx of [-1, 1]) S.chrome.push(new THREE.CylinderGeometry(0.08, 0.08, 2.4, 10).translate(sx * (W / 2 - 0.1), cabH - 0.2, cz0 + cabL + 0.08));
   return { S, lamps, ctx: { L, W, H: b.H, wr: b.wr, tw: 0.3, track: W - 0.32 } };
 }
