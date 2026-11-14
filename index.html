@@ -1,0 +1,212 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>NO HESI — Highway Traffic Simulator</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:ital,wght@0,400;0,500;0,600;0,700;0,800;1,700;1,800&family=Barlow:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<canvas id="gl" aria-label="Game view"></canvas>
+
+<div id="ui">
+  <!-- Loading / start -->
+  <section id="s-loading" class="screen active">
+    <div class="load-wrap">
+      <div class="logo big"><span class="no">NO</span><span class="hesi">HESI</span></div>
+      <div class="tagline">HIGHWAY TRAFFIC SIMULATOR</div>
+      <div class="load-bar"><div id="load-fill"></div></div>
+      <div id="load-text" class="load-text">Building the highway…</div>
+      <button id="btn-start" class="btn primary hidden">CLICK TO START</button>
+      <div class="load-note">Best with headphones. Keyboard or controller.</div>
+    </div>
+  </section>
+
+  <!-- Main menu -->
+  <section id="s-menu" class="screen">
+    <div class="menu-left">
+      <div class="logo"><span class="no">NO</span><span class="hesi">HESI</span></div>
+      <div class="tagline">HIGHWAY TRAFFIC SIMULATOR</div>
+      <nav class="menu-list">
+        <button class="menu-item" data-go="setup"><span class="mi-k">01</span>DRIVE</button>
+        <button class="menu-item" data-go="garage"><span class="mi-k">02</span>GARAGE</button>
+        <button class="menu-item" data-go="custom"><span class="mi-k">03</span>CUSTOMIZE</button>
+        <button class="menu-item" data-go="challenges"><span class="mi-k">04</span>CHALLENGES</button>
+        <button class="menu-item" data-go="settings"><span class="mi-k">05</span>SETTINGS</button>
+      </nav>
+      <div class="menu-stats">
+        <div><span>CAREER</span><b id="m-career">0</b></div>
+        <div><span>BEST RUN</span><b id="m-best">0</b></div>
+        <div><span>CAR</span><b id="m-car">—</b></div>
+      </div>
+    </div>
+    <div class="menu-foot">
+      <span><kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> drive</span>
+      <span><kbd>Space</kbd> handbrake</span>
+      <span><kbd>C</kbd> camera</span>
+      <span><kbd>Shift</kbd>/<kbd>Ctrl</kbd> gears</span>
+      <span><kbd>Esc</kbd> pause</span>
+    </div>
+  </section>
+
+  <!-- Drive setup -->
+  <section id="s-setup" class="screen panel-screen">
+    <header class="screen-head"><button class="back" data-go="menu">‹ BACK</button><h2>DRIVE</h2></header>
+    <div class="setup-grid">
+      <div class="setup-col">
+        <h3>MODE</h3>
+        <div id="mode-cards" class="cards"></div>
+        <h3>ENVIRONMENT</h3>
+        <div id="env-cards" class="cards env"></div>
+      </div>
+      <div class="setup-col narrow">
+        <h3>TIME OF DAY</h3>
+        <div id="time-chips" class="chips"></div>
+        <h3>WEATHER</h3>
+        <div id="weather-chips" class="chips"></div>
+        <h3>TRAFFIC</h3>
+        <div id="density-chips" class="chips"></div>
+        <div class="setup-car">
+          <div class="sc-label">YOUR CAR</div>
+          <div id="setup-car-name" class="sc-name">—</div>
+          <div id="setup-car-cls" class="sc-cls"></div>
+          <button class="btn ghost small" data-go="garage">CHANGE CAR</button>
+        </div>
+        <button id="btn-go" class="btn primary wide">START DRIVING</button>
+      </div>
+    </div>
+  </section>
+
+  <!-- Garage -->
+  <section id="s-garage" class="screen garage-screen">
+    <header class="screen-head"><button class="back" data-go="menu">‹ BACK</button><h2>GARAGE</h2></header>
+    <div id="car-list" class="car-list"></div>
+    <div class="car-info">
+      <div id="ci-maker" class="ci-maker"></div>
+      <div id="ci-name" class="ci-name"></div>
+      <div id="ci-cls" class="ci-cls"></div>
+      <p id="ci-blurb" class="ci-blurb"></p>
+      <div id="ci-stats" class="ci-stats"></div>
+      <div class="ci-actions">
+        <button id="btn-select" class="btn primary">SELECT</button>
+        <button id="btn-tocustom" class="btn ghost">CUSTOMIZE</button>
+      </div>
+      <div id="ci-lock" class="ci-lock hidden"></div>
+    </div>
+    <div class="drag-hint">Drag to rotate</div>
+  </section>
+
+  <!-- Customisation -->
+  <section id="s-custom" class="screen garage-screen">
+    <header class="screen-head"><button class="back" data-go="garage">‹ GARAGE</button><h2>CUSTOMIZE</h2><span id="cu-car" class="head-sub"></span></header>
+    <div class="custom-panel">
+      <div id="cu-tabs" class="tabs"></div>
+      <div id="cu-body" class="cu-body"></div>
+      <div class="ci-actions">
+        <button id="btn-cu-reset" class="btn ghost small">RESET TO FACTORY</button>
+        <button id="btn-cu-rev" class="btn ghost small">REV ENGINE</button>
+        <button id="btn-cu-drive" class="btn primary small">DRIVE</button>
+      </div>
+    </div>
+    <div class="drag-hint">Drag to rotate</div>
+  </section>
+
+  <!-- Challenges -->
+  <section id="s-challenges" class="screen panel-screen">
+    <header class="screen-head"><button class="back" data-go="menu">‹ BACK</button><h2>CHALLENGES</h2><span id="ch-progress" class="head-sub"></span></header>
+    <div id="ch-list" class="ch-list"></div>
+  </section>
+
+  <!-- Settings -->
+  <section id="s-settings" class="screen panel-screen">
+    <header class="screen-head"><button class="back" id="settings-back">‹ BACK</button><h2>SETTINGS</h2></header>
+    <div id="settings-body" class="settings-body"></div>
+  </section>
+
+  <!-- Pause -->
+  <section id="s-pause" class="screen modal">
+    <div class="modal-card">
+      <h2>PAUSED</h2>
+      <div id="pause-stats" class="pause-stats"></div>
+      <div class="modal-actions">
+        <button class="btn primary" id="p-resume">RESUME</button>
+        <button class="btn ghost" id="p-restart">RESTART</button>
+        <button class="btn ghost" id="p-camera">CAMERA: CHASE</button>
+        <button class="btn ghost" id="p-settings">SETTINGS</button>
+        <button class="btn ghost" id="p-garage">GARAGE</button>
+        <button class="btn ghost" id="p-menu">MAIN MENU</button>
+      </div>
+    </div>
+  </section>
+
+  <!-- Results -->
+  <section id="s-results" class="screen modal">
+    <div class="modal-card">
+      <div id="r-kicker" class="kicker"></div>
+      <h2 id="r-title">RESULTS</h2>
+      <div id="r-big" class="r-big"></div>
+      <div id="r-stats" class="r-stats"></div>
+      <div id="r-note" class="r-note"></div>
+      <div class="modal-actions">
+        <button class="btn primary" id="r-retry">RETRY</button>
+        <button class="btn ghost" id="r-menu">MAIN MENU</button>
+      </div>
+    </div>
+  </section>
+
+  <!-- HUD -->
+  <div id="hud" class="hidden">
+    <div class="hud-tl">
+      <div id="h-mode" class="h-mode">ENDLESS</div>
+      <div class="h-stats">
+        <div><span>BEST</span><b id="h-best">0</b></div>
+        <div><span id="h-dist-l">DIST</span><b id="h-dist">0.0</b></div>
+        <div><span>NEAR MISS</span><b id="h-near">0</b></div>
+      </div>
+      <div id="h-obj" class="h-obj hidden"><div id="h-obj-t"></div><div class="h-obj-bar"><div id="h-obj-fill"></div></div></div>
+    </div>
+    <div id="h-scorebox" class="hud-score">
+      <div id="h-timer" class="h-timer hidden">2:00.0</div>
+      <div id="h-score" class="score">0</div>
+      <div class="mult-row">
+        <span id="h-mult" class="mult">×1.0</span>
+        <div class="combo"><div id="h-combo"></div></div>
+      </div>
+    </div>
+    <div id="h-pops" class="pops"></div>
+    <div id="h-banner" class="banner"></div>
+    <div class="hud-br">
+      <svg id="h-gauge" viewBox="0 0 200 200" class="gauge">
+        <path id="g-track" class="g-track" d=""/>
+        <path id="g-red" class="g-red" d=""/>
+        <path id="g-rpm" class="g-rpm" d=""/>
+      </svg>
+      <div class="g-center">
+        <div id="h-gear" class="g-gear">1</div>
+        <div id="h-speed" class="g-speed">0</div>
+        <div id="h-unit" class="g-unit">MPH</div>
+      </div>
+      <div class="g-boost"><div id="h-boost"></div></div>
+    </div>
+    <div id="h-cam" class="cam-label"></div>
+    <div id="h-hint" class="h-hint"></div>
+  </div>
+  <div id="toasts" class="toasts"></div>
+  <div id="confirm" class="screen modal">
+    <div class="modal-card small">
+      <h2 id="cf-title">ARE YOU SURE?</h2>
+      <p id="cf-text"></p>
+      <div class="modal-actions row">
+        <button class="btn primary" id="cf-yes">YES</button>
+        <button class="btn ghost" id="cf-no">CANCEL</button>
+      </div>
+    </div>
+  </div>
+</div>
+<noscript>This game needs JavaScript and WebGL.</noscript>
+<script src="game.js"></script>
+</body>
+</html>

@@ -1,0 +1,18 @@
+{
+  "name": "no-hesi-browser",
+  "version": "1.0.0",
+  "description": "NO HESI - a browser highway traffic driving simulator built with Three.js",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "node build.mjs --minify && cp index.html style.css dist/",
+    "build:dev": "node build.mjs && cp index.html style.css dist/"
+  },
+  "dependencies": {
+    "three": "0.170.0"
+  },
+  "devDependencies": {
+    "esbuild": "^0.28.2",
+    "three-mesh-bvh": "^0.8.3"
+  }
+}
