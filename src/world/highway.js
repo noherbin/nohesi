@@ -7,9 +7,11 @@ import {
   cactusGeometry, rockGeometry, buildingGeometry, billboardGeometry, speedSignGeometry, merge,
 } from './props.js';
 import { mulberry32, hash3, fbm2, noise2, clamp, lerp, smoothstep } from '../core/utils.js';
+import * as DT from './details.js';
 
 export const CL = 64; // chunk length (m)
 const ROWS = CL / DS;
+const PYLON_SP = 280; // transmission tower spacing (m)
 
 const JERSEY = [[-0.3, 0], [-0.29, 0.08], [-0.17, 0.33], [-0.08, 0.95], [0.08, 0.95], [0.17, 0.33], [0.29, 0.08], [0.3, 0]];
 
@@ -170,19 +172,79 @@ export class Highway {
       tower: [28, 80, 28, 16, 8], tall: [32, 150, 32, 16, 8], glass: [30, 110, 26, 16, 8],
     };
     this.buildingPools = {};
+    this.buildingVariants = {};
     let bseed = env.seed * 3;
     for (const kind of new Set(env.props.buildingKinds)) {
       const [w, h, d, fpt, bpt] = protos[kind];
-      const geo = buildingGeometry(w, h, d, fpt, bpt);
       const ft = T.facadeTextures(kind, bseed++);
       this.textures.push(ft.map, ft.emissive);
       const mat = new THREE.MeshStandardMaterial({
         map: ft.map, emissiveMap: ft.emissive, emissive: 0xffffff, emissiveIntensity: 0,
         roughness: kind === 'glass' || kind === 'tall' ? 0.25 : 0.85, metalness: kind === 'glass' || kind === 'tall' ? 0.5 : 0.05,
       });
-      this.buildingPools[kind] = new PropPool(scene, [{ geometry: geo, material: mat, receiveShadow: false }], 90, { colors: true });
-      this.buildingPools[kind].dims = [w, h, d];
-      this.buildingPools[kind].mat = mat;
+      // a few silhouettes per kind: setbacks, cornices, rooftop plant, masts
+      const variants = [];
+      for (let v = 0; v < 3; v++) {
+        const bv = DT.buildingVariant(kind, w, h, d, fpt, bpt, bseed * 31 + v * 7);
+        const pool = new PropPool(scene, [{ geometry: bv.geo, material: mat, receiveShadow: false }], 40, { colors: true });
+        pool.dims = [w, h, d];
+        pool.mat = mat;
+        pool.lights = bv.lights;
+        variants.push(pool);
+      }
+      this.buildingVariants[kind] = variants;
+      this.buildingPools[kind] = variants[0];
+    }
+    // aircraft warning lights on tall buildings (blink at night)
+    this.warnMat = new THREE.MeshBasicMaterial({ color: 0xff2a1a, toneMapped: false });
+    P.warn = new PropPool(scene, [{ geometry: new THREE.SphereGeometry(0.45, 8, 6), material: this.warnMat }], 600);
+    // grass tufts
+    const dryGrass = env.id === 'desert' || env.id === 'la';
+    this.grassTex = DT.grassTexture(dryGrass);
+    this.textures.push(this.grassTex);
+    this.mat.grass = new THREE.MeshStandardMaterial({ map: this.grassTex, alphaTest: 0.45, side: THREE.DoubleSide, roughness: 1 });
+    P.grass = new PropPool(scene, [{ geometry: DT.grassGeometry(), material: this.mat.grass }], 2400, { colors: true });
+    // roadside furniture
+    this.reflMat = new THREE.MeshBasicMaterial({ color: 0xffb340, toneMapped: false });
+    const dl = DT.delineatorGeometry();
+    P.delineator = new PropPool(scene, [
+      { geometry: dl.post, material: new THREE.MeshStandardMaterial({ color: 0xe8e8e4, roughness: 0.6 }) },
+      { geometry: dl.refl, material: this.reflMat },
+    ], 700);
+    const cb = DT.callBoxGeometry();
+    P.callBox = new PropPool(scene, [
+      { geometry: cb.post, material: this.mat.steel },
+      { geometry: cb.body, material: new THREE.MeshStandardMaterial({ color: 0xe8b820, roughness: 0.5 }), castShadow: shadows },
+    ], 20);
+    const mm = DT.mileMarkerGeometry();
+    this.mileTex = DT.mileMarkerTexture();
+    this.textures.push(this.mileTex);
+    P.mile = new PropPool(scene, [
+      { geometry: mm.post, material: this.mat.steel },
+      { geometry: mm.plate, material: new THREE.MeshStandardMaterial({ map: this.mileTex, roughness: 0.5, side: THREE.DoubleSide }) },
+    ], 20);
+    // transmission line towers
+    this.pylon = DT.pylonGeometry();
+    P.pylon = new PropPool(scene, [{ geometry: this.pylon.geo, material: this.mat.steel, castShadow: shadows }], 40);
+    this.wireMat = new THREE.LineBasicMaterial({ color: 0x2c2f33, transparent: true, opacity: 0.85 });
+    // wall graffiti / ivy and road-surface marks
+    this.wallArtTex = DT.wallArtTexture(env.seed);
+    this.marksTex = DT.roadMarksTexture(env.seed + 1);
+    this.textures.push(this.wallArtTex, this.marksTex);
+    this.mat.wallArt = new THREE.MeshStandardMaterial({ map: this.wallArtTex, transparent: true, alphaTest: 0.08, depthWrite: false, roughness: 0.9, side: THREE.DoubleSide, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -4 });
+    this.mat.marks = new THREE.MeshStandardMaterial({ map: this.marksTex, color: 0x000000, transparent: true, depthWrite: false, roughness: 0.6, polygonOffset: true, polygonOffsetFactor: -1, polygonOffsetUnits: -2 });
+    // glare screen blades on the median barrier (city highways)
+    {
+      const c = document.createElement('canvas');
+      c.width = 16; c.height = 512;
+      const x = c.getContext('2d');
+      x.clearRect(0, 0, 16, 512);
+      x.fillStyle = '#5d636a';
+      for (let y = 0; y < 512; y += 32) x.fillRect(0, y, 16, 11);
+      this.glareTex = new THREE.CanvasTexture(c);
+      this.glareTex.wrapS = this.glareTex.wrapT = THREE.RepeatWrapping;
+      this.textures.push(this.glareTex);
+      this.mat.glare = new THREE.MeshStandardMaterial({ map: this.glareTex, alphaTest: 0.5, side: THREE.DoubleSide, roughness: 0.7, metalness: 0.3 });
     }
     // Billboards
     const bb = billboardGeometry();
@@ -310,8 +372,8 @@ export class Highway {
     const kMin = Math.floor((sPlayer - this.behind) / CL);
     const kMax = Math.floor((sPlayer + this.viewDist) / CL);
     this._sMinKeep = kMin * CL;
-    this.road.ensure((kMax + 2) * CL + 50);
-    this._ensureFeatures((kMax + 2) * CL);
+    this.road.ensure((kMax + 2) * CL + 380); // power lines reach to the next pylon
+    this._ensureFeatures((kMax + 2) * CL + 340); // the power line looks one tower ahead
     for (const [k, ch] of this.chunks) {
       if (k < kMin || k > kMax + 1) {
         this._freeChunk(ch);
@@ -331,7 +393,7 @@ export class Highway {
 
   _allPools() {
     const list = Object.values(this.pools);
-    for (const p of Object.values(this.buildingPools || {})) list.push(p);
+    for (const vs of Object.values(this.buildingVariants || {})) for (const p of vs) list.push(p);
     for (const p of this.billboardPools || []) list.push(p);
     return list;
   }
@@ -437,6 +499,47 @@ export class Highway {
         for (const d of dashD) quad(a, b, d, 0.13, W);
       }
       ch.meshes.push(this._mesh(new Float32Array(verts), null, new Float32Array(cols), idx, this.mat.marking, { receive: true }));
+      // surface wear: skid marks, sealed cracks, patch repairs and oil drips
+      {
+        const rr = mulberry32(env.seed * 7919 + k * 104729);
+        const mv = [], mu = [], mi = [];
+        const P0 = [0, 0, 0];
+        const Q = {};
+        const decal = (sa, sb, d, w, cell) => {
+          const n = Math.max(1, Math.round((sb - sa) / 2));
+          const base = mv.length / 3;
+          for (let i = 0; i <= n; i++) {
+            const sv = lerp(sa, sb, i / n);
+            road.sample(sv, Q);
+            for (const [dd, u] of [[d - w / 2, 0], [d + w / 2, 1]]) {
+              toLocal(Q, dd, 0.007, P0, 0);
+              mv.push(P0[0], P0[1], P0[2]);
+              mu.push((cell + u) / 4, i / n);
+            }
+            if (i < n) { const a = base + i * 2; mi.push(a, a + 1, a + 2, a + 1, a + 3, a + 2); }
+          }
+        };
+        const laneD = () => {
+          const opp = rr() < 0.4;
+          const lane = Math.floor(rr() * (opp ? L.oppLanes : L.n));
+          return (opp ? -1 : 1) * L.laneCenter(lane);
+        };
+        const nMarks = Math.floor(rr() * 3.2);
+        for (let m = 0; m < nMarks; m++) {
+          const kind = Math.floor(rr() * 4);
+          const sa = s0 + rr() * CL * 0.7;
+          const d = laneD() + (rr() - 0.5) * 0.8;
+          if (kind === 0) decal(sa, Math.min(s0 + CL, sa + 12 + rr() * 18), d, 1.9, 0);
+          else if (kind === 1) decal(sa, Math.min(s0 + CL, sa + 4 + rr() * 8), d + (rr() - 0.5) * 1.5, 0.9, 1);
+          else if (kind === 2) decal(sa, Math.min(s0 + CL, sa + 2.5 + rr() * 3), d, 2.2 + rr(), 2);
+          else decal(sa, Math.min(s0 + CL, sa + 2 + rr() * 2), d + (rr() - 0.5) * 0.3, 1.2, 3);
+        }
+        if (mi.length) {
+          const m = this._mesh(new Float32Array(mv), new Float32Array(mu), null, mi, this.mat.marks, { receive: true });
+          m.renderOrder = 1;
+          ch.meshes.push(m);
+        }
+      }
       // raised pavement markers ("Botts' dots" / cat's eyes): small retroreflective bumps that catch light at night
       const rv = [], rc = [], ri = [];
       const P0 = [0, 0, 0], P1 = [0, 0, 0];
@@ -505,6 +608,40 @@ export class Highway {
       ch.meshes.push(this._mesh(pos, uv, null, idx, mat, { cast: true, receive: true }));
     };
     profileMesh(JERSEY, 0, false, this.mat.concrete);
+    if (env.id === 'night' || env.id === 'urban') profileMesh([[0, 0.95], [0, 1.55]], 0, false, this.mat.glare, 1 / 0.6, 0.5);
+    // graffiti tags and ivy on the sound walls
+    if (env.outer === 'wall') {
+      const rr = mulberry32(env.seed * 31 + k * 977);
+      const av = [], au = [], ai = [];
+      const P0 = [0, 0, 0], Q = {};
+      const H = env.wallHeight;
+      const n = rr() < 0.75 ? 1 + Math.floor(rr() * 2) : 0;
+      for (let m = 0; m < n; m++) {
+        const side = rr() < 0.5 ? 1 : -1;
+        const ivy = rr() < 0.35;
+        const cell = ivy ? 6 + Math.floor(rr() * 2) : Math.floor(rr() * 6);
+        const len = ivy ? 4 + rr() * 6 : 3 + rr() * 3;
+        const sa = s0 + rr() * (CL - len);
+        const y0 = ivy ? 0.9 : 1.0 + rr() * 0.3, y1 = Math.min(H - 0.15, y0 + (ivy ? 1.6 + rr() * 0.8 : len * 0.42));
+        const d = side * (L.wallD - 0.1 - 0.012);
+        const cu = cell % 4, cv = Math.floor(cell / 4);
+        const segs = Math.max(1, Math.round(len / 2));
+        const base = av.length / 3;
+        for (let i = 0; i <= segs; i++) {
+          const sv = sa + (i / segs) * len;
+          road.sample(sv, Q);
+          // text reads left-to-right when facing the wall from the road
+          const u = side > 0 ? 1 - i / segs : i / segs;
+          for (const [yy, v] of [[y0, 0], [y1, 1]]) {
+            toLocal(Q, d, yy, P0, 0);
+            av.push(P0[0], P0[1], P0[2]);
+            au.push((cu + u) / 4, 1 - (cv + 1 - v) / 2);
+          }
+          if (i < segs) { const a = base + i * 2; ai.push(a, a + 1, a + 2, a + 1, a + 3, a + 2); }
+        }
+      }
+      if (ai.length) ch.meshes.push(this._mesh(new Float32Array(av), new Float32Array(au), null, ai, this.mat.wallArt, { receive: true }));
+    }
     const outerProfile = () => {
       if (env.outer === 'wall') {
         const H = env.wallHeight;
@@ -725,6 +862,54 @@ export class Highway {
     ch.foot = [];
     const dStart = L.wallD + 1.2;
     const pr = env.props;
+    // high-voltage line running parallel to the road (placed before buildings so they keep clear of it)
+    const pyl = env.id === 'desert' || env.id === 'la' ? (env.id === 'desert' ? L.wallD + 60 : L.wallD + 1.2 + 77) : 0;
+    if (pyl) {
+      const dP = pyl, dO = dP - L.wallD - 1.2;
+      const pc = this.road.pos(s0 + CL / 2, dP, {});
+      const corridor = this._foot(pc.X, pc.Y, pc.H, 8, CL / 2 + 1);
+      corridor.soft = true; // big things stay out; shrubs and rocks may sit under the wires
+      ch.foot.push(corridor);
+      const an = ch.anchor;
+      const pts = [];
+      for (let n = Math.floor(s0 / PYLON_SP) - 1; ; n++) {
+        const sp = this._pylonS(n);
+        if (sp >= s1) break;
+        if (sp < s0) continue;
+        const a = this.road.pos(sp, dP, {});
+        const eA = a.E + this.groundOffset(sp, dO, 1);
+        const idx = P.pylon.add(a.X, a.Y, eA, a.H, 1, 1, 1, this.origin, null);
+        if (idx >= 0) ch.props.push([P.pylon, idx]);
+        const sq = this._pylonS(n + 1);
+        const b = this.road.pos(sq, dP, {});
+        const eB = b.E + this.groundOffset(sq, dO, 1);
+        const span = Math.hypot(b.X - a.X, b.Y - a.Y);
+        const sag = 6.5 * Math.min(1.4, span / 280);
+        // the wires run in a straight chord, which drifts off the road-parallel corridor on curves
+        const chord = this._foot((a.X + b.X) / 2, (a.Y + b.Y) / 2, Math.atan2(b.X - a.X, b.Y - a.Y), 8, span / 2 + 2);
+        chord.soft = true;
+        ch.foot.push(chord);
+        for (const [ax, ay] of this.pylon.attach) {
+          const P0 = [a.X + Math.cos(a.H) * ax, a.Y - Math.sin(a.H) * ax, eA + ay];
+          const P1 = [b.X + Math.cos(b.H) * ax, b.Y - Math.sin(b.H) * ax, eB + ay];
+          const nseg = 16;
+          for (let q = 0; q < nseg; q++) {
+            for (const f of [q / nseg, (q + 1) / nseg]) {
+              const X = lerp(P0[0], P1[0], f), Y = lerp(P0[1], P1[1], f), E = lerp(P0[2], P1[2], f) - sag * 4 * f * (1 - f);
+              pts.push(X - an.X, E - an.E, -(Y - an.Y));
+            }
+          }
+        }
+      }
+      if (pts.length) {
+        const lg = new THREE.BufferGeometry();
+        lg.setAttribute('position', new THREE.Float32BufferAttribute(pts, 3));
+        const lines = new THREE.LineSegments(lg, this.wireMat);
+        lines.frustumCulled = false;
+        ch.meshes.push(lines);
+        ch.group.add(lines);
+      }
+    }
     // Buildings first (largest footprints), then billboards, then vegetation fills the gaps
     if (pr.buildings > 0) {
       const kinds = pr.buildingKinds;
@@ -734,8 +919,9 @@ export class Highway {
           if (rng() > pr.buildings * (b === 0 && !env.elevated ? 0.55 : 0.9) * Math.min(1, dens + 0.2)) continue;
           let kind = kinds[Math.floor(rng() * kinds.length)];
           if (b === 0 && (kind === 'tall' || kind === 'tower') && env.id === 'la') kind = 'mid';
-          const pool = this.buildingPools[kind];
-          if (!pool) continue;
+          const vars = this.buildingVariants[kind];
+          if (!vars) continue;
+          const pool = vars[Math.floor(rng() * vars.length)];
           const [w, , dd] = pool.dims;
           const sc = 0.8 + rng() * 0.45;
           const hs = sc * (0.7 + rng() * 0.7);
@@ -754,8 +940,16 @@ export class Highway {
             if (!this._clear(ch, f, s, dist - latHalf, 2.5)) continue;
             const h = env.elevated ? this.groundOffset(s, dOut, side) : this.groundOffset(s, dOut, side) - 0.5;
             color.setRGB(tint, tint * (0.97 + rng() * 0.06), tint * (0.95 + rng() * 0.1));
-            this._addProp(ch, pool, s, side * dist, h, yawOff, sc, hs, sc, color);
+            const bp = this._addProp(ch, pool, s, side * dist, h, yawOff, sc, hs, sc, color);
             ch.foot.push(f);
+            if (pool.lights.length) {
+              const yaw = bp.H + yawOff, cy = Math.cos(yaw), sy = Math.sin(yaw);
+              for (const [lx, ly, lz] of pool.lights) {
+                const X = bp.X + lx * sc * cy - lz * sc * sy, Y = bp.Y - lx * sc * sy - lz * sc * cy;
+                const idx = P.warn.add(X, Y, bp.E + h + ly * hs, 0, 1, 1, 1, this.origin, null);
+                if (idx >= 0) ch.props.push([P.warn, idx]);
+              }
+            }
             break;
           }
         }
@@ -807,12 +1001,51 @@ export class Highway {
       place(P.bush, pr.bushes * 9, 1.0, 90, 0.6, 1.5, { color: env.id === 'desert' ? [0.17, 0.25, 0.55] : [0.25, 0.32, 0.45], r: 1.2 });
       place(P.cactus, pr.cacti * 5, 4, 140, 0.6, 1.3, { r: 1 });
       place(P.rock, pr.rocks * 6, 3, 200, 0.5, 2.6, { color: [0.07, 0.3, 0.55], r: 1.5 });
+      // grass tufts: dense near the road, thinning out with distance (no footprint checks: they're tiny)
+      const gN = Math.round((env.id === 'desert' ? 90 : env.id === 'la' ? 55 : 40) * dens);
+      const gc = env.id === 'desert' ? [0.11, 0.42, 0.55] : env.id === 'la' ? [0.16, 0.35, 0.45] : [0.24, 0.3, 0.32];
+      for (let i = 0; i < gN; i++) {
+        const side = rng() < 0.5 ? 1 : -1;
+        const dOut = 0.4 + Math.pow(rng(), 1.9) * 45;
+        const sg = s0 + rng() * CL;
+        const sc = 0.7 + rng() * 0.9;
+        color.setHSL(gc[0] + (rng() - 0.5) * 0.04, gc[1], gc[2] * (0.75 + rng() * 0.5));
+        this._addProp(ch, P.grass, sg, side * (dStart + dOut), this.groundOffset(sg, dOut, side) - 0.04, rng() * 6.28, sc * 1.3, sc, sc * 1.3, color);
+      }
+    }
+    // roadside furniture on open highways: delineators on the guardrail, call boxes, mile markers
+    if (env.outer === 'guardrail') {
+      for (let sd = Math.ceil(s0 / 32) * 32; sd < s1; sd += 32) {
+        for (const side of [1, -1]) {
+          if (this._nearFeature(sd, 6)) continue;
+          this._addProp(ch, P.delineator, sd, side * (L.wallD + 0.12), 0, side > 0 ? 0 : Math.PI, 1, 1, 1);
+        }
+      }
+      for (let sb = Math.ceil(s0 / 805) * 805; sb < s1; sb += 805) {
+        if (!this._nearFeature(sb, 15)) this._addProp(ch, P.callBox, sb, L.wallD + 1.3, this.groundOffset(sb, 1.3 - 1.2, 1) + 0.0, 0, 1, 1, 1);
+      }
+      for (let sm = Math.ceil(s0 / 1609) * 1609; sm < s1; sm += 1609) {
+        if (!this._nearFeature(sm, 15)) this._addProp(ch, P.mile, sm, L.wallD + 0.9, this.groundOffset(sm, 0, 1), 0, 1, 1, 1);
+      }
     }
   }
 
+  /** Road distance of the n-th transmission tower, nudged off overpass footprints. */
+  _pylonS(n) {
+    let s = n * PYLON_SP;
+    for (const f of this.features) if (f.type === 'overpass' && Math.abs(f.s - s) < 24) s = f.s + 28;
+    return s;
+  }
+
+  /** Is s within m metres of an overpass or gantry? */
+  _nearFeature(s, m) {
+    for (const f of this.features) if (Math.abs(f.s - s) < m + (f.type === 'overpass' ? 10 : 2)) return true;
+    return false;
+  }
+
   _clearSmall(ch, f) {
-    for (const c of this.chunks.values()) if (c.foot) for (const o of c.foot) if (o.hx > 1 && this._footHit(o, f, 0.2)) return false;
-    for (const o of ch.foot) if (o.hx > 1 && this._footHit(o, f, 0.2)) return false;
+    for (const c of this.chunks.values()) if (c.foot) for (const o of c.foot) if (o.hx > 1 && !o.soft && this._footHit(o, f, 0.2)) return false;
+    for (const o of ch.foot) if (o.hx > 1 && !o.soft && this._footHit(o, f, 0.2)) return false;
     return true;
   }
 
@@ -830,6 +1063,10 @@ export class Highway {
     this.lampMat.color.copy(this.lampColor).multiplyScalar(0.25 + lit * 2.5);
     this.poolMat.opacity = lit * (0.42 + wet * 0.25);
     for (const p of Object.values(this.buildingPools)) p.mat.emissiveIntensity = lit * 1.6;
+    const blink = (performance.now() % 1600) < 900 ? 1 : 0.08;
+    this.warnMat.color.setRGB(1, 0.16, 0.1).multiplyScalar(lerp(0.35, 2.4 * blink, lit));
+    this.reflMat.color.setRGB(1, 0.7, 0.25).multiplyScalar(lerp(0.55, 1.15, lit));
+    this.wireMat.color.setScalar(lerp(0.17, 0.05, night));
     for (const p of this.billboardPools) p.panelMat.emissiveIntensity = 0.35 + lit * 1.4;
     for (const m of this.signMats) m.emissiveIntensity = lit * 0.12;
     this.mat.marking.emissive.setScalar(lit * 0.06);
@@ -849,7 +1086,9 @@ export class Highway {
     for (const p of this._allPools()) p.dispose(this.group);
     this.pools = {};
     this.buildingPools = {};
+    this.buildingVariants = {};
     this.billboardPools = [];
+    for (const m of [this.warnMat, this.reflMat, this.wireMat]) m?.dispose();
     if (this.gantryPool) for (const o of this.gantryPool.free) this.group.remove(o);
     if (this.overpassPool) for (const o of this.overpassPool.free) this.group.remove(o);
     for (const t of this.textures || []) t.dispose();
