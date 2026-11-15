@@ -27,10 +27,10 @@ import { CHALLENGES, GOAL_LABEL } from './config/challenges.js';
 import { clamp, lerp, damp, smoothstep, MS_TO_MPH, MS_TO_KMH, M_TO_MI, formatInt } from './core/utils.js';
 
 export const QUALITY = {
-  low: { pixelRatio: 0.75, shadows: false, shadowMap: 1024, post: false, bloom: false, samples: 0, viewDist: 520, propDensity: 0.45, rain: 0.35, mirror: false },
-  medium: { pixelRatio: 1.0, shadows: true, shadowMap: 1024, post: true, bloom: true, samples: 0, viewDist: 700, propDensity: 0.7, rain: 0.6, mirror: true },
-  high: { pixelRatio: 1.25, shadows: true, shadowMap: 2048, post: true, bloom: true, samples: 4, viewDist: 900, propDensity: 1.0, rain: 1.0, mirror: true },
-  ultra: { pixelRatio: 2.0, shadows: true, shadowMap: 4096, post: true, bloom: true, samples: 4, viewDist: 1150, propDensity: 1.25, rain: 1.0, mirror: true },
+  low: { pixelRatio: 0.75, shadows: false, shadowMap: 1024, post: false, bloom: false, samples: 0, viewDist: 520, propDensity: 0.45, rain: 0.35, mirror: false, lampLights: 0 },
+  medium: { pixelRatio: 1.0, shadows: true, shadowMap: 1024, post: true, bloom: true, samples: 0, viewDist: 700, propDensity: 0.7, rain: 0.6, mirror: true, lampLights: 3 },
+  high: { pixelRatio: 1.25, shadows: true, shadowMap: 2048, post: true, bloom: true, samples: 4, viewDist: 900, propDensity: 1.0, rain: 1.0, mirror: true, lampLights: 4 },
+  ultra: { pixelRatio: 2.0, shadows: true, shadowMap: 4096, post: true, bloom: true, samples: 4, viewDist: 1150, propDensity: 1.25, rain: 1.0, mirror: true, lampLights: 4 },
 };
 const QORDER = ['low', 'medium', 'high', 'ultra'];
 const nextFrame = () => new Promise((r) => requestAnimationFrame(() => r()));
@@ -151,6 +151,7 @@ export class Game {
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, Q.pixelRatio));
     this.renderer.shadowMap.enabled = Q.shadows;
     this.sky.setQuality(Q);
+    this.highway.setLampLights(Q.lampLights ?? 0);
     this.highway.viewDist = Q.viewDist;
     this.highway.propDensity = Q.propDensity;
     this.postfx.setSamples(Q.samples);
@@ -868,6 +869,7 @@ export class Game {
     const night = sky.night, wet = sky.wet;
     if (dt > 0) this.traffic.render(this.origin, night, wet);
     this.highway.setAmbient(night, wet);
+    this.highway.updateLampLights(P.X, P.Y);
     this.renderer.toneMappingExposure = sky.exposure;
     const camMode = this.camRig.mode;
     const inside = camMode === 'cockpit';
@@ -987,19 +989,23 @@ export class Game {
     };
     G.begin();
     const dayK = 0.35 + night * 0.65;
-    this.traffic.forEachLamp((x, y, z, kind, I) => {
+    this.traffic.forEachLamp((x, y, z, kind, I, facing) => {
       const f = fade(x, y, z);
       if (kind === 'tail') {
-        const k = I * f * dayK;
-        G.add(x, y, z, k, k * 0.06, k * 0.035, I > 0.9 ? 0.95 : 0.55 + night * 0.2);
+        // tail lamps read from behind and a little from the side
+        const k = I * f * dayK * (0.15 + 0.85 * smoothstep(-0.2, 0.5, facing));
+        G.add(x, y, z, k, k * 0.06, k * 0.035, I > 0.9 ? 0.9 : 0.5 + night * 0.15);
       } else if (kind === 'head') {
-        const k = I * f;
-        G.add(x, y, z, k, k * 0.94, k * 0.82, 1.5);
+        // headlights only flare when they point at you (oncoming traffic, cars behind); nothing from the cars you follow
+        const aim = smoothstep(0.1, 0.85, facing);
+        if (aim <= 0.01) return;
+        const k = I * f * aim * 0.75;
+        G.add(x, y, z, k, k * 0.94, k * 0.84, 0.75 + 0.35 * aim);
       } else {
         const k = f;
         G.add(x, y, z, k, k * 0.5, k * 0.04, 0.75);
       }
-    });
+    }, cam.position);
     if (night > 0.2) {
       const lc = this.highway.lampColor;
       const k = smoothstep(0.2, 0.8, night);
@@ -1007,7 +1013,7 @@ export class Game {
       this.highway.forEachLamp((l) => {
         const x = l[0] - ox, y = l[2], z = -(l[1] - oy);
         const f = fade(x, y, z) * k;
-        G.add(x, y, z, lc.r * f, lc.g * f, lc.b * f, 3.4);
+        G.add(x, y, z, lc.r * f * 0.8, lc.g * f * 0.8, lc.b * f * 0.8, 2.4);
       });
     }
     const car = this.player;
@@ -1019,8 +1025,15 @@ export class Game {
         G.add(t.x, t.y, t.z, k, k * 0.07, k * 0.04, 0.5 + brake * 0.45);
       }
       if (car.headOn > 0.1 && this.camRig.mode !== 'bumper') {
+        // seen from behind (chase cams) the player's headlights only show as a faint spill
         const heads = car.lampWorld(car.model.lamps.head, []);
-        for (const t of heads) G.add(t.x, t.y, t.z, car.headOn, car.headOn * 0.96, car.headOn * 0.9, 1.1);
+        const fwd = this._tmpV.set(0, 0, -1).transformDirection(car.model.body.matrixWorld);
+        for (const t of heads) {
+          const dx = cx - t.x, dy = cy - t.y, dz = cz - t.z, dl = Math.hypot(dx, dy, dz) || 1;
+          const aim = 0.12 + 0.88 * smoothstep(0.1, 0.85, (fwd.x * dx + fwd.y * dy + fwd.z * dz) / dl);
+          const k = car.headOn * aim * 0.8;
+          G.add(t.x, t.y, t.z, k, k * 0.96, k * 0.9, 0.6 + 0.4 * aim);
+        }
       }
     }
     G.end(cam, H);
@@ -1050,22 +1063,30 @@ export class Game {
   /* ---------------------------------------------------------------- garage */
   _garageFrame(dt) {
     const g = this.garage;
-    // frame the car in the free space between the side panels
+    // frame the car in whichever open area shows it largest: beside the panels, or below them on tall screens
     if (!this._gfit || (this._gfitT = (this._gfitT || 0) + 1) % 20 === 0 || this._gfit.screen !== this.ui.screen) {
-      const W = window.innerWidth;
-      let left = 0, right = W;
+      const W = window.innerWidth, H = window.innerHeight;
+      const areas = [];
       if (this.ui.screen === 'garage') {
         const l = document.getElementById('car-list').getBoundingClientRect();
         const r = document.querySelector('#s-garage .car-info').getBoundingClientRect();
-        left = l.right; right = r.left;
+        areas.push([l.right, 0, r.left, H]); // between the list and the info panel
+        areas.push([l.right, r.bottom + 20, W, H]); // under the info panel
       } else {
-        right = document.querySelector('#s-custom .custom-panel').getBoundingClientRect().left;
+        const r = document.querySelector('#s-custom .custom-panel').getBoundingClientRect();
+        areas.push([0, 0, r.left, H]);
+        areas.push([0, r.bottom + 20, W, H]);
       }
-      const free = Math.max(200, right - left);
-      const center = (left + right) / 2;
-      this._gfit = { screen: this.ui.screen, offset: (W / 2 - center) / W, fit: clamp((0.5 * W) / (0.95 * free), 1, 2.2) };
+      let best = null;
+      for (const [x0, y0, x1, y1] of areas) {
+        const fw = x1 - x0, fh = y1 - y0;
+        if (fw < 120 || fh < 160) continue;
+        const fit = g.fitFor(fw, fh, H);
+        if (!best || fit < best.fit - 0.05) best = { fit, offset: (W / 2 - (x0 + x1) / 2) / W, offsetY: y0 > 0 ? (H / 2 - (y0 + y1) / 2) / H : 0 };
+      }
+      this._gfit = { screen: this.ui.screen, ...(best || { fit: 1, offset: 0, offsetY: 0 }) };
     }
-    g.update(dt, this._gfit.offset, this._gfit.fit);
+    g.update(dt, this._gfit.offset, this._gfit.fit, this._gfit.offsetY);
     if (this.revT >= 0 && this.audio.ready) {
       this.revT += dt;
       const t = this.revT;

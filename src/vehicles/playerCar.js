@@ -51,7 +51,7 @@ export class PlayerCar {
     const picks = lamps.length > 2 ? [lamps[0], lamps[lamps.length - 1]] : lamps;
     for (const l of picks) {
       // gentle decay keeps the near road from blowing out while the beam still reaches far
-      const sp = new THREE.SpotLight(0xfff2dc, 0, 140, 0.42, 0.7, 0.8);
+      const sp = new THREE.SpotLight(0xfff2dc, 0, 150, 0.42, 0.8, 0.95);
       sp.position.set(l[0] * 0.9, l[1], l[2]);
       sp.target.position.set(l[0] * 0.6, 0.15, l[2] - 34);
       sp.castShadow = false;
@@ -173,7 +173,7 @@ export class PlayerCar {
     this.headOn = damp(this.headOn, lit, 3, dt);
     m.mats.tail.emissiveIntensity = 0.35 + this.headOn * 0.9 + this.brakeLight * 3.2;
     m.mats.head.emissiveIntensity = 0.3 + this.headOn * 3.0;
-    for (const s of this.spots) s.intensity = this.headOn * 120;
+    for (const s of this.spots) s.intensity = this.headOn * 70;
   }
 
   /** World-space positions (three coords) of local lamp points. */

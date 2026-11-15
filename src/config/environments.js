@@ -18,7 +18,7 @@ export const ENVIRONMENTS = {
     wallHeight: 3.4,
     elevated: 0,
     terrain: { near: 0x8a7d58, far: 0x6f6a48, hill: 26, flat: 40 },
-    lights: { spacing: 54, style: 'double', color: 0xffc58a },
+    lights: { spacing: 54, style: 'double', color: 0xf2f6ff },
     props: {
       palms: 0.75, trees: 0.35, bushes: 0.7, cacti: 0, rocks: 0.05,
       buildings: 0.55, buildingKinds: ['low', 'warehouse', 'mid', 'low', 'mid', 'tower'],
@@ -127,7 +127,7 @@ export const ENVIRONMENTS = {
     wallHeight: 2.2,
     elevated: 0,
     terrain: { near: 0x4f5048, far: 0x46473f, hill: 6, flat: 30 },
-    lights: { spacing: 40, style: 'double', color: 0xffa94d },
+    lights: { spacing: 40, style: 'double', color: 0xeef3ff },
     props: {
       palms: 0.25, trees: 0.25, bushes: 0.4, cacti: 0, rocks: 0,
       buildings: 1.0, buildingKinds: ['tower', 'tall', 'mid', 'glass', 'tower', 'mid'],

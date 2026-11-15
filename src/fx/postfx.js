@@ -207,9 +207,9 @@ export class PostFX {
       u.flare.value = 0;
     }
     if (this.bloomOn) {
-      this.bloomPass.strength = 0.2 + n * 0.32 + wet * 0.08;
-      this.bloomPass.threshold = 0.95 - n * 0.1;
-      this.bloomPass.radius = 0.45 + n * 0.15;
+      this.bloomPass.strength = 0.2 + n * 0.14 + wet * 0.05;
+      this.bloomPass.threshold = 0.95 - n * 0.04;
+      this.bloomPass.radius = 0.45 + n * 0.05;
     }
   }
 

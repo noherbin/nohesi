@@ -536,7 +536,7 @@ export class Traffic {
     }
     for (let i = bi; i < 160; i++) { this.beams.setMatrixAt(i, ZERO); this.streaks.setMatrixAt(i, ZERO); }
     this._lastBeams = bi;
-    this.beamMat.opacity = smoothstep(0.15, 0.8, night) * 0.38;
+    this.beamMat.opacity = smoothstep(0.15, 0.8, night) * 0.27;
     this.streakMat.opacity = wet * (0.35 + 0.45 * night);
     this.beams.instanceMatrix.needsUpdate = true;
     this.streaks.instanceMatrix.needsUpdate = true;
@@ -551,22 +551,31 @@ export class Traffic {
     }
   }
 
-  /** Visit light emitters for the glow system: cb(x, y, z, kind, intensity). */
-  forEachLamp(cb) {
+  /** Visit light emitters for the glow system: cb(x, y, z, kind, intensity, facing).
+   *  facing is the cosine between the lamp's outward direction and the direction to `cam` (1 = pointing at the viewer). */
+  forEachLamp(cb, cam) {
     const night = this.night;
     for (const list of [this.cars, this.opp]) {
       for (const c of list) {
         if (!c.matrix) continue;
         const lp = c.t.lamps;
+        const e = c.matrix.elements;
+        const zl = Math.hypot(e[8], e[9], e[10]) || 1;
+        const zx = e[8] / zl, zy = e[9] / zl, zz = e[10] / zl;
+        const face = (l) => {
+          const dx = cam.x - _v.x, dy = cam.y - _v.y, dz = cam.z - _v.z;
+          const dl = Math.hypot(dx, dy, dz) || 1;
+          return (Math.sign(l[2]) * (zx * dx + zy * dy + zz * dz)) / dl;
+        };
         const tailI = c.brake > 0.3 ? 1 : 0.25 + night * 0.45;
         for (const l of lp.tail) {
           _v.set(l[0], l[1], l[2]).applyMatrix4(c.matrix);
-          cb(_v.x, _v.y, _v.z, 'tail', tailI);
+          cb(_v.x, _v.y, _v.z, 'tail', tailI, face(l));
         }
         if (night > 0.2) {
           for (const l of lp.head) {
             _v.set(l[0], l[1], l[2]).applyMatrix4(c.matrix);
-            cb(_v.x, _v.y, _v.z, 'head', night);
+            cb(_v.x, _v.y, _v.z, 'head', night, face(l));
           }
         }
         if (c.blinkL || c.blinkR) {

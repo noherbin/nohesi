@@ -6,8 +6,8 @@ import * as T from './textures.js';
 
 // Lighting keyframes by sun elevation (degrees)
 const KEYS = [
-  { el: -14, light: 0x8ea3d6, lightI: 0.32, sky: 0x2b3656, gnd: 0x16140f, hemiI: 0.55, fog: 0x0c111d, exp: 1.05, envI: 0.35 },
-  { el: -5, light: 0x6f7fb8, lightI: 0.22, sky: 0x41507a, gnd: 0x1e1b18, hemiI: 0.6, fog: 0x283150, exp: 1.0, envI: 0.45 },
+  { el: -14, light: 0x8ea3d6, lightI: 0.45, sky: 0x2b3656, gnd: 0x16140f, hemiI: 0.78, fog: 0x0c111d, exp: 0.8, envI: 0.4 },
+  { el: -5, light: 0x6f7fb8, lightI: 0.26, sky: 0x41507a, gnd: 0x1e1b18, hemiI: 0.68, fog: 0x283150, exp: 0.82, envI: 0.48 },
   { el: 0, light: 0xff6a35, lightI: 0.9, sky: 0x7d7fa8, gnd: 0x3a2c22, hemiI: 0.62, fog: 0x8f746f, exp: 0.85, envI: 0.55 },
   { el: 5, light: 0xffa158, lightI: 2.4, sky: 0x9aa8c8, gnd: 0x5a4430, hemiI: 0.6, fog: 0xcf9f7c, exp: 0.7, envI: 0.6 },
   { el: 15, light: 0xffd6a6, lightI: 3.0, sky: 0xa9c3e6, gnd: 0x6a5a48, hemiI: 0.6, fog: 0xc4ccd6, exp: 0.56, envI: 0.62 },
@@ -268,7 +268,7 @@ export class SkySystem {
     // a few bright horizon cards so night paint shows streetlight-like highlights
     this.envLights = new THREE.Group();
     for (let i = 0; i < 10; i++) {
-      const m = new THREE.Mesh(new THREE.PlaneGeometry(60, 14), new THREE.MeshBasicMaterial({ color: 0xffc080, side: THREE.DoubleSide }));
+      const m = new THREE.Mesh(new THREE.PlaneGeometry(60, 14), new THREE.MeshBasicMaterial({ color: 0xe2e9f7, side: THREE.DoubleSide }));
       const a = (i / 10) * Math.PI * 2;
       m.position.set(Math.cos(a) * 600, 120 + (i % 3) * 30, Math.sin(a) * 600);
       m.lookAt(0, 0, 0);
@@ -393,7 +393,7 @@ export class SkySystem {
     // night city glow tint
     const cityGlow = env?.id === 'night' || env?.id === 'urban' || env?.id === 'la' ? 1 : 0.35;
     if (this.night > 0) {
-      const glowC = new THREE.Color(0x3a2a24).multiplyScalar(cityGlow);
+      const glowC = new THREE.Color(0x26272c).multiplyScalar(cityGlow);
       fog.lerp(new THREE.Color(0x141824).add(glowC.clone().multiplyScalar(0.4)), this.night * 0.6);
     }
 
@@ -421,8 +421,8 @@ export class SkySystem {
 
     // Night glow dome
     const gu = this.glow.material.uniforms;
-    gu.amount.value = this.night * (0.6 + cityGlow * 0.6) + oc * 0.25 * (1 - this.night);
-    gu.horizon.value.setHex(0x4a3328).multiplyScalar(cityGlow).lerp(new THREE.Color(0x30343c), oc * 0.6);
+    gu.amount.value = this.night * (0.3 + cityGlow * 0.3) + oc * 0.25 * (1 - this.night);
+    gu.horizon.value.setHex(0x2e2d31).multiplyScalar(cityGlow).lerp(new THREE.Color(0x30343c), oc * 0.6);
     gu.top.value.setHex(0x050914).lerp(new THREE.Color(0x15171c), oc);
 
     this.stars.material.opacity = this.night * (1 - oc) * (cityGlow > 0.5 ? 0.55 : 1);

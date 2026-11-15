@@ -33,6 +33,54 @@ export class Highway {
     this.env = null;
     this._tmp = {};
     this._tmp2 = {};
+    // real spot lights hung under the nearest lamp heads, so cars and the road catch streetlight highlights;
+    // kept for the life of the game (adding/removing lights recompiles every material)
+    this.lampLights = [];
+    for (let i = 0; i < 4; i++) {
+      const L = new THREE.SpotLight(0xffffff, 0, 50, 1.2, 0.85, 1.3);
+      L.castShadow = false;
+      scene.add(L, L.target);
+      this.lampLights.push(L);
+    }
+    this._lampPick = [];
+  }
+
+  /** How many overhead lamp lights to use (0 on low quality). Changing it recompiles materials, so only on quality change. */
+  setLampLights(n) {
+    this.lampLights.forEach((L, i) => (L.visible = i < n));
+  }
+
+  /** Hang the lamp lights under the lamp heads nearest the player (absolute X, Y). */
+  updateLampLights(X, Y) {
+    const lit = smoothstep(0.25, 0.75, this.night);
+    const lights = this.lampLights.filter((L) => L.visible);
+    if (!lights.length) return;
+    const pick = this._lampPick;
+    pick.length = 0;
+    if (lit > 0 && this.env?.lights.spacing > 0) {
+      for (const ch of this.chunks.values()) {
+        for (const l of ch.lamps) {
+          const d2 = (l[0] - X) ** 2 + (l[1] - Y) ** 2;
+          if (d2 > 70 * 70) continue;
+          pick.push([d2, l]);
+        }
+      }
+      pick.sort((a, b) => a[0] - b[0]);
+    }
+    const ox = this.origin.x, oy = this.origin.y;
+    for (let i = 0; i < lights.length; i++) {
+      const L = lights[i];
+      const p = pick[i];
+      if (!p) { L.intensity = 0; continue; }
+      const l = p[1];
+      // fade with distance so a light swapping to a new lamp happens where it is already dark
+      const d = Math.sqrt(p[0]);
+      L.intensity = 75 * lit * (1 - smoothstep(30, 52, d)) * (1 + this.wet * 0.15);
+      L.color.copy(this.lampColor);
+      L.position.set(l[0] - ox, l[2] - 0.35, -(l[1] - oy));
+      L.target.position.set(L.position.x, l[2] - 10, L.position.z);
+      L.target.updateMatrixWorld();
+    }
   }
 
   /* ---------------------------------------------------------------- setup */
@@ -1060,9 +1108,9 @@ export class Highway {
     this.wet = wet;
     if (!this.mat) return;
     const lit = smoothstep(0.25, 0.75, night);
-    this.lampMat.color.copy(this.lampColor).multiplyScalar(0.25 + lit * 2.5);
-    this.poolMat.opacity = lit * (0.42 + wet * 0.25);
-    for (const p of Object.values(this.buildingPools)) p.mat.emissiveIntensity = lit * 1.6;
+    this.lampMat.color.copy(this.lampColor).multiplyScalar(0.25 + lit * 1.8);
+    this.poolMat.opacity = lit * (this.lampLights.some((L) => L.visible) ? 0.3 + wet * 0.2 : 0.42 + wet * 0.25);
+    for (const p of Object.values(this.buildingPools)) p.mat.emissiveIntensity = lit * 1.35;
     const blink = (performance.now() % 1600) < 900 ? 1 : 0.08;
     this.warnMat.color.setRGB(1, 0.16, 0.1).multiplyScalar(lerp(0.35, 2.4 * blink, lit));
     this.reflMat.color.setRGB(1, 0.7, 0.25).multiplyScalar(lerp(0.55, 1.15, lit));

@@ -60,13 +60,15 @@ export class GarageScene {
     const fill = new THREE.HemisphereLight(0xbfc8d6, 0x101010, 0.6);
     this.scene.add(fill);
     // light bars on the ceiling for reflections
+    this.bars = [];
     for (let i = -2; i <= 2; i++) {
       const bar = new THREE.Mesh(new THREE.BoxGeometry(0.15, 0.05, 9), new THREE.MeshBasicMaterial({ color: 0xffffff, toneMapped: false }));
       bar.position.set(i * 1.6, 7, 0);
       this.scene.add(bar);
+      this.bars.push(bar);
     }
     this.car = null;
-    this.angle = 0.6;
+    this.angle = 3.35; // front three-quarter view
     this.spin = 0.18;
     this.dragging = false;
     this.zoom = 1;
@@ -84,12 +86,23 @@ export class GarageScene {
     this.car.mats.tail.emissiveIntensity = 1.4;
     this.table.add(this.car.root);
     this.def = def;
-    this.dist = Math.max(10.8, def.body.L * 2.3);
+    this.dist = Math.max(9.6, def.body.L * 2.05);
   }
 
   setAspect(a) {
+    this.aspect = a;
     this.camera.aspect = a;
     this.camera.updateProjectionMatrix();
+  }
+
+  /** Camera distance multiplier so the car fits a free area `freeW` x `freeH` px on a screen `h` px tall. */
+  fitFor(freeW, freeH, h) {
+    if (!this.def) return 1;
+    const size = this.def.body.L * 1.12; // projected length from the 3/4 view, plus a margin
+    const k = h / 2 / Math.tan(THREE.MathUtils.degToRad(this.camera.fov / 2)); // px per metre at 1 m
+    const dW = (size * k) / (0.88 * freeW); // no wider than 88% of the free area
+    const dH = (size * 0.62 * k) / Math.min(0.7 * h, 0.85 * freeH); // and no taller than it
+    return Math.min(3, Math.max(1, Math.max(dW, dH) / this.dist));
   }
 
   drag(dx, dy) {
@@ -100,7 +113,7 @@ export class GarageScene {
     this._resume = setTimeout(() => (this.spin = 0.18), 2500);
   }
 
-  update(dt, offsetX = 0, fit = 1) {
+  update(dt, offsetX = 0, fit = 1, offsetY = 0) {
     this.angle += this.spin * dt;
     this.table.rotation.y = this.angle;
     const d = this.dist * this.zoom * fit;
@@ -109,7 +122,12 @@ export class GarageScene {
     cam.position.set(tx * Math.cos(this.pitch), 0.8 + Math.sin(this.pitch) * d, tz * Math.cos(this.pitch));
     cam.lookAt(0, 0.55, 0);
     // shift the car sideways on screen to make room for side panels
-    cam.setViewOffset(1000, 1000, offsetX * 1000, 0, 1000, 1000);
+    // (setViewOffset also sets the camera aspect, so it must be given the real screen proportions)
+    const a = this.aspect || 1;
+    cam.setViewOffset(1000 * a, 1000, offsetX * 1000 * a, offsetY * 1000, 1000 * a, 1000);
+    // the ceiling bars only work as a backdrop on wide screens; framed low on a tall screen they cut across the header
+    const showBars = offsetY === 0 && a > 1.1;
+    for (const b of this.bars) b.visible = showBars;
     if (this.car) {
       for (const w of this.car.wheels) w.spin.rotation.x = 0;
     }
