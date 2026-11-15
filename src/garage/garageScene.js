@@ -1,8 +1,42 @@
 // Showroom scene: rotating turntable, studio lighting and reflections for the garage/customisation screens.
 import * as THREE from 'three';
-import { RoomEnvironment } from 'three/examples/jsm/environments/RoomEnvironment.js';
 import { buildPlayerCar, disposeCar } from '../vehicles/carBuilder.js';
 import { damp } from '../core/utils.js';
+
+/**
+ * Photo-studio reflection environment: a black room with one long overhead softbox, tall strip lights down
+ * each side and a faint horizon band. Car paint then carries the long, crisp highlight lines of a studio
+ * shoot, which trace the shoulders, arches and roof the way real cars are photographed.
+ */
+function studioEnvironment() {
+  const sc = new THREE.Scene();
+  const basic = (hex, k = 1) => new THREE.MeshBasicMaterial({ color: new THREE.Color(hex).multiplyScalar(k), side: THREE.DoubleSide });
+  sc.add(new THREE.Mesh(new THREE.SphereGeometry(40, 32, 16), new THREE.MeshBasicMaterial({ color: 0x050506, side: THREE.BackSide })));
+  const floor = new THREE.Mesh(new THREE.CircleGeometry(40, 32).rotateX(-Math.PI / 2), basic(0x121316));
+  floor.position.y = -0.05;
+  sc.add(floor);
+  // overhead softbox, long axis along the car's default heading, with a dimmer surround
+  const top = new THREE.Mesh(new THREE.PlaneGeometry(2.6, 10).rotateX(Math.PI / 2), basic(0xffffff, 6));
+  top.position.set(0, 7.5, 0);
+  sc.add(top);
+  const halo = new THREE.Mesh(new THREE.PlaneGeometry(6, 13).rotateX(Math.PI / 2), basic(0xdfe6f0, 0.7));
+  halo.position.set(0, 7.6, 0);
+  sc.add(halo);
+  // tall side strips: the bright line that runs along the doors and shoulders
+  for (const [x, z, ry, k] of [[11, 0, Math.PI / 2, 3.2], [-11, 0, Math.PI / 2, 2.4], [0, 12, 0, 2.2], [0, -12, 0, 2.6]]) {
+    const strip = new THREE.Mesh(new THREE.PlaneGeometry(ry ? 12 : 9, 0.7).rotateY(ry), basic(0xffffff, k));
+    strip.position.set(x, 2.4, z);
+    sc.add(strip);
+  }
+  // a soft cool panel low on one side and a faint horizon band for the lower body
+  const panel = new THREE.Mesh(new THREE.PlaneGeometry(5, 2.2).rotateY(Math.PI / 4), basic(0x9fb8ff, 0.5));
+  panel.position.set(-8, 1.4, -8);
+  sc.add(panel);
+  const band = new THREE.Mesh(new THREE.CylinderGeometry(24, 24, 0.9, 64, 1, true), new THREE.MeshBasicMaterial({ color: 0x2a2d33, side: THREE.BackSide }));
+  band.position.y = 0.9;
+  sc.add(band);
+  return sc;
+}
 
 export class GarageScene {
   constructor(renderer) {
@@ -11,9 +45,9 @@ export class GarageScene {
     this.scene.background = new THREE.Color(0x07080a);
     this.camera = new THREE.PerspectiveCamera(32, 1, 0.1, 200);
     const pm = new THREE.PMREMGenerator(renderer);
-    this.env = pm.fromScene(new RoomEnvironment(), 0.04).texture;
+    this.env = pm.fromScene(studioEnvironment(), 0.01, 0.1, 100).texture;
     this.scene.environment = this.env;
-    this.scene.environmentIntensity = 0.38;
+    this.scene.environmentIntensity = 0.9;
     this.scene.fog = new THREE.Fog(0x07080a, 14, 34);
     // floor with soft reflective finish and a subtle radial gradient
     const c = document.createElement('canvas');
@@ -48,7 +82,7 @@ export class GarageScene {
     this.table.add(ring);
     this.scene.add(this.table);
     // lights
-    const key = new THREE.SpotLight(0xffffff, 200, 40, 0.5, 0.6, 1.2);
+    const key = new THREE.SpotLight(0xffffff, 120, 40, 0.5, 0.6, 1.2);
     key.position.set(4, 9, 5);
     key.castShadow = true;
     key.shadow.mapSize.set(1024, 1024);
@@ -57,7 +91,7 @@ export class GarageScene {
     const rim = new THREE.SpotLight(0x9fc4ff, 140, 40, 0.6, 0.7, 1.2);
     rim.position.set(-6, 5, -6);
     this.scene.add(rim, rim.target);
-    const fill = new THREE.HemisphereLight(0xbfc8d6, 0x101010, 0.6);
+    const fill = new THREE.HemisphereLight(0xbfc8d6, 0x101010, 0.3);
     this.scene.add(fill);
     // light bars on the ceiling for reflections
     this.bars = [];

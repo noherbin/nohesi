@@ -6,7 +6,7 @@ import { makeMonotone, clamp, lerp } from '../core/utils.js';
 import { plateTexture, blobShadowTexture, grilleMeshTexture, tireTexture } from '../world/textures.js';
 import { RoundedBoxGeometry } from 'three/examples/jsm/geometries/RoundedBoxGeometry.js';
 import { interiorFor } from '../config/interiors.js';
-import { brakeDiscTexture, orangePeelNormal } from '../camera/interiorTextures.js';
+import { brakeDiscTexture, orangePeelNormal, headlampTexture, taillampTexture } from '../camera/interiorTextures.js';
 const roundBox = (w, h, d, r) => new RoundedBoxGeometry(w, h, d, 2, Math.min(r, w / 2 - 1e-3, h / 2 - 1e-3, d / 2 - 1e-3));
 
 /* ------------------------------------------------------------ templates */
@@ -40,7 +40,10 @@ function sectionTemplate(sect, N = 24) {
     let xx = x * k;
     // features only on the flank (where the section is near full width)
     const flank = Math.min(1, Math.max(0, (x - 0.82) / 0.12));
-    xx += flank * (crease * Math.exp(-Math.pow((y - cy) / cw, 2)) - scallop * Math.exp(-Math.pow((y - sy) / 0.09, 2)));
+    // shoulder crease (raised), and a concave lower character line whose upper edge is sharp and lower edge fades
+    const sd = y - sy, sw = sect.scallopW ?? 0.09;
+    const dent = sd > 0 ? Math.exp(-Math.pow(sd / (sw * 0.35), 2)) : Math.exp(-Math.pow(sd / sw, 2));
+    xx += flank * (crease * Math.exp(-Math.pow((y - cy) / cw, 2)) - scallop * dent);
     return xx;
   };
   const pts = dense.map(([x, y]) => [shape(x, y), y]);
@@ -48,7 +51,7 @@ function sectionTemplate(sect, N = 24) {
   const acc = [0];
   for (let i = 1; i < pts.length; i++) acc.push(acc[i - 1] + Math.hypot(pts[i][0] - pts[i - 1][0], (pts[i][1] - pts[i - 1][1]) * 1.6));
   const total = acc[acc.length - 1];
-  const keepY = [cy - cw * 1.2, cy - cw * 0.45, cy, cy + cw * 0.45, cy + cw * 1.2, s];
+  const keepY = [cy - cw * 1.2, cy - cw * 0.45, cy, cy + cw * 0.45, cy + cw * 1.2, s, sy - 0.05, sy - 0.02, sy, sy + 0.008, sy + 0.02];
   const out = [];
   let j = 0;
   for (let k = 0; k <= N; k++) {
@@ -104,21 +107,48 @@ export function bodyContext(b, custom = {}, hi = true) {
   const L = b.L, W = b.W;
   const widen = custom.kit === 'wide' ? 0.07 : 0;
   const lower = custom.suspension === 'slammed' ? 0.07 : custom.suspension === 'lowered' ? 0.035 : 0;
-  const top = makeMonotone(b.top);
-  const bot = makeMonotone(b.bottom);
+  const top0 = makeMonotone(b.top);
+  const bot0 = makeMonotone(b.bottom);
+  // a real car's nose and tail are near-vertical faces (bumper lip low, bonnet / boot edge high), not a
+  // tapered blade: pull the profile ends apart so the front and rear read as panels rather than a pill
+  const bF = bot0(0.1), bR = bot0(0.9), tF = top0(0.045), tR = top0(0.97);
+  const bot = (t) => {
+    const y = bot0(t);
+    if (t < 0.1) return bF + (y - bF) * 0.55;
+    if (t > 0.9) return bR + (y - bR) * 0.72;
+    return y;
+  };
+  const top = (t) => {
+    const y = top0(t);
+    if (t < 0.045) return y + (tF - y) * 0.4 * (1 - t / 0.045) ** 0.5;
+    if (t > 0.97) return y + (tR - y) * 0.3 * ((t - 0.97) / 0.03) ** 0.5;
+    return y;
+  };
   const plan = { f: 0.075, r: 0.06, fp: 2.6, rp: 2.6, hips: 0, flare: 0, waist: 0, ...(b.plan || {}) };
-  // squarer tail in plan: flat rear panel with rounded corners instead of a rounded tub
-  plan.rp = Math.max(plan.rp, 3.4);
+  // production-car plan view: flat nose and tail panels with tight corners, not a rounded bar of soap
+  plan.fp = Math.max(plan.fp, 3.6);
+  plan.rp = Math.max(plan.rp, 3.8);
   const sect = { s: 0.45, nt: 3.0, nb: 7, ...(b.sect || {}) };
-  // flatter upper surfaces and crisper shoulders than the raw catalogue values
-  sect.nt = Math.max(sect.nt, 3.0) * 1.35;
+  // section like a real body side: widest near the belt line, doors almost vertical below it with a tucked
+  // rocker, a crisp shoulder crease, and taut, nearly flat bonnet / roof / boot surfaces above
+  sect.s = clamp(sect.s + 0.11, 0.55, 0.63);
+  sect.nt = Math.max(sect.nt * 1.35, 4.6);
+  sect.nb = Math.max(sect.nb, 9);
+  sect.tuck = sect.tuck ?? 0.08;
+  sect.crease = sect.crease ?? 0.014;
+  sect.creaseY = sect.creaseY ?? 0.02;
+  sect.creaseW = sect.creaseW ?? 0.016;
+  // lower character line: a crisp concave step low on the doors (light above, shadow below)
+  sect.scallop = sect.scallop ?? 0.014;
+  sect.scallopY = sect.scallopY ?? sect.s * 0.4;
+  sect.scallopW = sect.scallopW ?? 0.045;
   const tpl = sectionTemplate(sect, hi ? 30 : 12);
   const tFA = b.fa; // front axle t
   const zf = -L / 2 + tFA * L, zr = zf + b.wb;
   const tRA = (zr + L / 2) / L;
   const wr = b.wr, tw = b.tw ?? 0.25;
   const lowerAmt = custom.suspension === 'slammed' ? 0.07 : custom.suspension === 'lowered' ? 0.035 : 0;
-  const archR = wr + 0.045 + lowerAmt * 0.85;
+  const archR = wr + 0.03 + lowerAmt * 0.85;
   const z = (t) => -L / 2 + t * L;
   const hw = (t) => {
     let w = W / 2;
@@ -149,7 +179,17 @@ export function bodyContext(b, custom = {}, hi = true) {
     else if (t > cab.t3) d = (b.deckDip ?? 0.012) * Math.min(1, (t - cab.t3) / 0.03) * Math.min(1, Math.max(0, (0.985 - t) / 0.04));
     return d * Math.pow(1 - (ax / 0.8) * (ax / 0.8), 1.5);
   };
-  ctx.track = W - tw - 0.05 + widen * 2; // tyres sit nearly flush with the arches, like a real car
+  // tyres sit flush with each fender lip (1.5 cm in), so front and rear tracks follow the body's hips and flares
+  const lipTrack = (t) => {
+    const yTop = wr + archR - lower, bt = bot(t), tp = top(t);
+    const yn = clamp((yTop - bt) / Math.max(0.1, tp - bt), 0, 1);
+    const half = hw(t) * templateX(tpl, Math.min(yn, sect.s + 0.02)) * (1 + (b.haunch ?? 0.022) * 0.85);
+    return Math.max(W - tw - 0.12, Math.min(W + 0.1, 2 * (half - tw / 2 - 0.015)));
+  };
+  ctx.trackF = lipTrack(tFA);
+  ctx.trackR = lipTrack(tRA);
+  ctx.track = Math.min(ctx.trackF, ctx.trackR);
+  ctx.trackAt = (zz) => (zz < (zf + zr) / 2 ? ctx.trackF : ctx.trackR);
   ctx.frontZ = (x, y) => surfZ(ctx, x, y, true) ?? z(0.04);
   ctx.rearZ = (x, y) => surfZ(ctx, x, y, false) ?? z(0.96);
   ctx.halfWAt = (t, y) => {
@@ -214,7 +254,7 @@ function loftBody(ctx, trimH = 0.06, hi = true) {
   const R = ring.length;
   // tag the wheel-well inner wall (floor edge = 1, top of wall = 2) so it can follow the tyres' inner faces
   const wallTag = ring.map(([x, y]) => (Math.abs(Math.abs(x) - (xc - 0.004)) < 1e-6 && y === 0 ? 1 : Math.abs(Math.abs(x) - (xc + 0.012)) < 1e-6 && y === 0.002 ? 2 : 0));
-  const xInnerAbs = ctx.track / 2 - ctx.tw / 2 - 0.03;
+  const xInnerAt = (zz) => ctx.trackAt(zz) / 2 - ctx.tw / 2 - 0.03;
   const pos = new Float32Array(ts.length * R * 3);
   const fenderT = 0.065;
   for (let i = 0; i < ts.length; i++) {
@@ -227,7 +267,7 @@ function loftBody(ctx, trimH = 0.06, hi = true) {
     }
     let nearArch = false;
     for (const za of [ctx.zf, ctx.zr]) if (Math.abs(zz - za) < ctx.archR * 1.2) nearArch = true;
-    const xcS = clamp(xInnerAbs / Math.max(0.3, w), 0.3, 0.97);
+    const xcS = clamp(xInnerAt(zz) / Math.max(0.3, w), 0.3, 0.97);
     for (let j = 0; j < R; j++) {
       const o = (i * R + j) * 3;
       let [xn, yn] = ring[j];
@@ -488,9 +528,14 @@ function faceDecal(ctx, front, quad, off = 0.004, nu = 8, nv = 3) {
       const xB = lerp(quad[3][0], quad[2][0], u), yB = lerp(quad[3][1], quad[2][1], u);
       const x = lerp(xT, xB, v), y = lerp(yT, yB, v);
       let z = surfZ(ctx, x, y, front);
+      const onSurf = z !== null;
       if (z === null) z = lastZ ?? ctx.z(front ? 0.05 : 0.95);
       lastZ = z;
-      pos.push(x, y - ctx.lower, z + (front ? -off : off));
+      // stand off along the surface normal, so layered patches (bezel, lamp, lens) stay stacked in order even
+      // where the face turns round the corner (a z-only offset would let them cut through each other there)
+      const n = onSurf ? faceNormal(ctx, front, x, y) : null;
+      if (n) pos.push(x + n.x * off, y - ctx.lower + n.y * off, z + n.z * off);
+      else pos.push(x, y - ctx.lower, z + (front ? -off : off));
       uv.push(u, 1 - v);
     }
   }
@@ -504,6 +549,14 @@ function faceDecal(ctx, front, quad, off = 0.004, nu = 8, nv = 3) {
   g.setAttribute('uv', new THREE.Float32BufferAttribute(uv, 2));
   g.setIndex(idx);
   g.computeVertexNormals();
+  return g;
+}
+
+/** Remap a geometry's uv through f(u, v) -> [u', v'] (texture atlases). */
+function atlasUV(g, f) {
+  const uv = g.attributes.uv;
+  for (let i = 0; i < uv.count; i++) { const [a, b] = f(uv.getX(i), uv.getY(i)); uv.setXY(i, a, b); }
+  uv.needsUpdate = true;
   return g;
 }
 
@@ -706,7 +759,7 @@ export function mirrorPose(ctx) {
 export function carParts(def, custom = {}, hi = true) {
   const b = def.body;
   const ctx = bodyContext(b, custom, hi);
-  const S = { paint: [], glass: [], trim: [], decal: [], mesh: [], amber: [], amberL: [], amberR: [], chrome: [], head: [], drl: [], lens: [], tail: [], rev: [], plate: [], interior: [], kit: [], body2: [], cabinTop: [] };
+  const S = { paint: [], glass: [], trim: [], decal: [], mesh: [], amber: [], amberL: [], amberR: [], chrome: [], head: [], drl: [], lens: [], tail: [], rev: [], plate: [], interior: [], kit: [], body2: [], cabinTop: [], cover: [] };
   const lamps = { head: [], tail: [], ind: [], rev: [], exhaust: [] };
   const L = ctx.L, W = ctx.W, low = ctx.lower;
   const nu = hi ? 8 : 4, nv = hi ? 3 : 2;
@@ -783,11 +836,12 @@ export function carParts(def, custom = {}, hi = true) {
       for (const dx of offs) {
         const x = sx * (hx + dx);
         S.decal.push(faceDisc(ctx, true, x, hy, r + 0.018, 0.003));
-        S.head.push(faceDisc(ctx, true, x, hy, r, 0.006));
+        S.head.push(atlasUV(faceDisc(ctx, true, x, hy, r, 0.006), (u, v) => [0.75 + u * 0.25, v]));
+        if (hi) S.cover.push(faceDisc(ctx, true, x, hy, r + 0.014, 0.014, 28));
         if (hi) {
           // LED ring around a projector lens, as on modern round-lamp sports cars
           S.drl.push(faceDisc(ctx, true, x, hy, r * 0.88, 0.008, 24));
-          S.head.push(faceDisc(ctx, true, x, hy, r * 0.83, 0.009, 24));
+          S.head.push(atlasUV(faceDisc(ctx, true, x, hy, r * 0.83, 0.009, 24), (u, v) => [0.75 + u * 0.25, v]));
           S.chrome.push(faceDisc(ctx, true, x, hy, r * 0.42, 0.01, 16));
           S.lens.push(faceDisc(ctx, true, x, hy, r * 0.32, 0.011, 16));
         }
@@ -796,7 +850,17 @@ export function carParts(def, custom = {}, hi = true) {
     });
   } else {
     const hw = ls.headW ?? (headStyle === 'wide' ? 0.36 : headStyle === 'popup' ? 0.3 : 0.4);
-    const hh = ls.headH ?? (headStyle === 'wide' ? 0.06 : headStyle === 'popup' ? 0.05 : 0.1);
+    let hh = ls.headH ?? (headStyle === 'wide' ? 0.06 : headStyle === 'popup' ? 0.05 : 0.1);
+    // on a shallow nose a front-projected lamp would smear back along the bonnet: keep its true length real
+    {
+      const maxLen = headStyle === 'wide' ? 0.13 : 0.17;
+      for (let k = 0; k < 2; k++) {
+        const zt = surfZ(ctx, hx, hy + hh / 2, true), zb = surfZ(ctx, hx, hy - hh / 2, true);
+        if (zt === null || zb === null) break;
+        const len = Math.hypot(zt - zb, hh);
+        if (len > maxLen) hh *= maxLen / len;
+      }
+    }
     const slant = headStyle === 'wide' ? 0.05 : 0.025;
     // right-side shape: inner end taller, outer end swept up and tapered
     const q = [[hx - hw / 2, hy + hh / 2], [hx + hw / 2, hy + hh / 2 + slant * 0.4], [hx + hw / 2, hy - hh / 2 + hh * 0.45 + slant * 0.4], [hx - hw / 2, hy - hh / 2]];
@@ -804,7 +868,9 @@ export function carParts(def, custom = {}, hi = true) {
     both((sx) => {
       const L1 = sx > 0 ? q : mirrorQuad(q), B1 = sx > 0 ? bez : mirrorQuad(bez);
       S.decal.push(faceDecal(ctx, true, B1, 0.003, nu, nv));
-      S.head.push(faceDecal(ctx, true, L1, 0.006, nu, nv));
+      // internals texture runs inner -> outer on both sides (the mirrored quad starts at the outer end)
+      S.head.push(atlasUV(faceDecal(ctx, true, L1, 0.006, nu, nv), (u, v) => [(sx > 0 ? u : 1 - u) * 0.75, v]));
+      if (hi) S.cover.push(faceDecal(ctx, true, B1, 0.014, nu * 2, nv * 2));
       if (hi) {
         // projector lenses and a DRL strip for detail
         for (const f of [0.28, 0.6]) {
@@ -819,7 +885,9 @@ export function carParts(def, custom = {}, hi = true) {
     });
   }
   // ---- Grille / intakes
-  const gy = ls.grilleY ?? (b.bottom[0][1] + 0.18);
+  // the bumper's real lower edge (the body loft squares up the nose, so the raw profile point is too high)
+  const yLip = ctx.bot(0.004), yLipR = ctx.bot(0.996);
+  const gy = ls.grilleY ?? (yLip + 0.18);
   const grille = b.grille || 'wide';
   const slats = (x0, x1, y0, y1, n, vertical) => {
     if (!hi) return;
@@ -832,10 +900,12 @@ export function carParts(def, custom = {}, hi = true) {
   // an opening = gloss-black surround + dark mesh, both following the bumper surface
   const opening = (q, frame = 0.014, scale = 9) => {
     const f = [[q[0][0] - frame, q[0][1] + frame], [q[1][0] + frame, q[1][1] + frame], [q[2][0] + frame, q[2][1] - frame], [q[3][0] - frame, q[3][1] - frame]];
-    S.decal.push(faceDecal(ctx, true, f, 0.003, nu, nv));
-    S.mesh.push(worldUV(faceDecal(ctx, true, q, 0.005, nu, nv), scale));
+    // dense enough that the patch follows the bumper's curvature instead of cutting under it between vertices
+    const du = hi ? nu + 6 : nu, dv = hi ? nv + 3 : nv;
+    S.decal.push(faceDecal(ctx, true, f, 0.004, du, dv));
+    S.mesh.push(worldUV(faceDecal(ctx, true, q, 0.006, du, dv), scale));
   };
-  const yb0 = b.bottom[0][1];
+  const yb0 = yLip;
   // keep openings on the forward-facing part of the bumper (never smeared round the corners)
   const faceX = (y) => Math.max(0.25, ctx.halfWAt(0.03, y) - 0.1);
   let lowerIntake = true;
@@ -917,6 +987,7 @@ export function carParts(def, custom = {}, hi = true) {
     const bx = Math.min(W * 0.42, rearMaxX(ty));
     S.decal.push(faceDecal(ctx, false, rectQuad(-bx, bx, ty - th / 2 - 0.015, ty + th / 2 + 0.015), 0.003, hi ? 16 : 6, 2));
     S.tail.push(faceDecal(ctx, false, rectQuad(-bx + 0.012, bx - 0.012, ty - th / 2, ty + th / 2), 0.006, hi ? 16 : 6, 2));
+    if (hi) S.cover.push(faceDecal(ctx, false, rectQuad(-bx, bx, ty - th / 2 - 0.015, ty + th / 2 + 0.015), 0.013, 24, 3));
     if (hi) S.decal.push(faceDecal(ctx, false, rectQuad(-bx + 0.03, bx - 0.03, ty - 0.004, ty + 0.004), 0.009, 16, 1));
     both((sx) => lamps.tail.push([sx * tx, ty - low, (surfZ(ctx, sx * tx, ty, false) ?? ctx.z(0.97)) + 0.03]));
   } else if (tailStyle === 'round') {
@@ -935,6 +1006,7 @@ export function carParts(def, custom = {}, hi = true) {
       const qq = rectQuad(x0, x1, ty - 0.17, ty + 0.17);
       S.decal.push(faceDecal(ctx, false, sx > 0 ? rectQuad(x0 - 0.012, x1 + 0.01, ty - 0.185, ty + 0.185) : mirrorQuad(rectQuad(x0 - 0.012, x1 + 0.01, ty - 0.185, ty + 0.185)), 0.003, 3, 4));
       S.tail.push(faceDecal(ctx, false, sx > 0 ? qq : mirrorQuad(qq), 0.006, 3, 4));
+      if (hi) S.cover.push(faceDecal(ctx, false, sx > 0 ? rectQuad(x0 - 0.012, x1 + 0.01, ty - 0.185, ty + 0.185) : mirrorQuad(rectQuad(x0 - 0.012, x1 + 0.01, ty - 0.185, ty + 0.185)), 0.013, 4, 6));
       lamps.tail.push([sx * (x0 + x1) / 2, ty - low, (surfZ(ctx, sx * (x0 + x1) / 2, ty, false) ?? ctx.z(0.97)) + 0.03]);
     });
   } else if (tailStyle === 'tri') {
@@ -959,6 +1031,7 @@ export function carParts(def, custom = {}, hi = true) {
       const m = (q) => (sx > 0 ? q : mirrorQuad(q));
       S.decal.push(faceDecal(ctx, false, m(bz), 0.003, nu, nv));
       S.tail.push(faceDecal(ctx, false, m(qq), 0.006, nu, nv));
+      if (hi) S.cover.push(faceDecal(ctx, false, m(bz), 0.013, nu * 2, nv * 2));
       if (hi) {
         // smoked lower half, reversing lamp and an LED light-guide line
         const lo = [[xIn + 0.06, ty - 0.004], [xOut - 0.02, ty - 0.004], [xOut - 0.02, ty - th * 0.5 + 0.024], [xIn + 0.09, ty - th * 0.5 + 0.036]];
@@ -977,7 +1050,7 @@ export function carParts(def, custom = {}, hi = true) {
     lamps.ind.push([sx * (W / 2 - 0.12), hy - low, (surfZ(ctx, sx * (W / 2 - 0.15), hy, true) ?? ctx.z(0.03)) - 0.04]);
   });
   // ---- Rear plate & lower bumper
-  const ybr = b.bottom[b.bottom.length - 1][1];
+  const ybr = yLipR;
   const py = ls.plateY ?? (ybr + 0.16);
   if (hi && tailStyle !== 'split') both((sx) => {
     // reversing lamps low in the bumper either side of the plate
@@ -1170,7 +1243,7 @@ export function carParts(def, custom = {}, hi = true) {
   // ---- Body kit
   const kit = custom.kit || 'stock';
   const yb = b.bottom[2]?.[1] ?? 0.18;
-  const yfb = b.bottom[0][1];
+  const yfb = yLip;
   if (kit !== 'stock') {
     const agg = kit === 'aggressive' || kit === 'wide';
     // splitter hangs under the lowest edge of the front bumper and reaches just past its face
@@ -1361,7 +1434,8 @@ export function buildTrafficGeometry(def) {
   const metal = [...S.chrome];
   for (const a of axles) {
     for (const sx of [-1, 1]) {
-      const xs = a.dual ? [ctx.track / 2 - 0.16, ctx.track / 2 + 0.16] : [ctx.track / 2];
+      const tr = ctx.trackAt ? ctx.trackAt(a.z) : ctx.track;
+      const xs = a.dual ? [tr / 2 - 0.16, tr / 2 + 0.16] : [tr / 2];
       for (const x of xs) {
         const t = wg.tire.clone(), r = wg.rim.clone();
         if (sx < 0) { t.rotateY(Math.PI); r.rotateY(Math.PI); }
@@ -1377,12 +1451,92 @@ export function buildTrafficGeometry(def) {
   const shadow = [new THREE.PlaneGeometry(ctx.W * 1.28, ctx.L * 1.1).rotateX(-Math.PI / 2).translate(0, 0.03, 0)];
   const groups = { shadow, paint: S.paint, glass: [...S.glass, ...(S.decal || []), ...(S.mesh || []), ...(S.amber || []), ...(S.amberL || []), ...(S.amberR || []), ...(S.lens || []), ...(S.rev || [])], dark, metal, head: [...S.head, ...(S.drl || [])], tail: S.tail, plate: S.plate, body2: S.body2 };
   for (const [k, list] of Object.entries(groups)) if (list.length) out[k] = merge(list);
+  if (!isTruck) for (const k of ['paint', 'dark', 'body2']) if (out[k]) bakeCarAO(out[k], ctx, { tyres: k === 'dark' });
   return { groups: out, lamps, dims: { L: ctx.L, W: ctx.W, H: def.body.H } };
 }
 
+/* ------------------------------------------------------------ ambient occlusion */
+/**
+ * Bake a per-vertex occlusion term ('aoDark' = 1 - visibility) into a merged car geometry. Real cars read as
+ * heavy and grounded because the sills, the tucked-under body sides and the wheel wells see the dark underside
+ * and the car's own shadow rather than the sky; without it the lower body glows like a toy.
+ * Local space: ground at y = 0, x across, z along. `tyres` = darken the upper part of fixed tyres (traffic).
+ */
+export function bakeCarAO(geo, ctx, { tyres = false } = {}) {
+  const p = geo.attributes.position, n = geo.attributes.normal;
+  if (!p || !n) return geo;
+  const out = new Float32Array(p.count);
+  const W2 = ctx.W / 2, wr = ctx.wr, archR = ctx.archR ?? wr + 0.04;
+  const axles = ctx.zf !== undefined ? [ctx.zf, ctx.zr] : [];
+  const sm = (a, b, x) => { const t = clamp((x - a) / (b - a), 0, 1); return t * t * (3 - 2 * t); };
+  for (let i = 0; i < p.count; i++) {
+    const x = p.getX(i), y = p.getY(i), z = p.getZ(i), ny = n.getY(i);
+    const ax = Math.abs(x);
+    const h = sm(0.03, 0.75, y);
+    let ao = 1;
+    // sky visibility falls off toward the ground for anything not facing up
+    ao *= 1 - (1 - Math.max(0, ny)) * (1 - h) * 0.45;
+    // faces turned toward the road see the dark underside of the car
+    if (ny < 0) ao *= 1 - -ny * (0.5 + 0.3 * (1 - h));
+    for (const za of axles) {
+      const dy = y - wr, dz = z - za, rd = Math.hypot(dy, dz);
+      if (dy < -wr * 0.35 || rd > archR + 0.18 || ax > W2 + 0.06) continue;
+      const inTyre = tyres && Math.abs(ax - (ctx.trackAt ? ctx.trackAt(za) : ctx.track) / 2) < ctx.tw / 2 + 0.01 && rd < wr + 0.01;
+      if (inTyre) {
+        // the part of the tyre tucked up under the arch
+        ao *= 1 - 0.5 * sm(-0.05, wr * 0.9, dy);
+      } else if (rd < archR - 0.004) {
+        // inside the wheel well: liner and inner walls, darker the deeper in
+        ao *= 0.36 - 0.18 * clamp((W2 - ax) / 0.35, 0, 1);
+      } else {
+        // the arch lip and the panel just around it
+        ao *= 0.74 + 0.26 * sm(0, 1, (rd - archR) / 0.18);
+      }
+    }
+    out[i] = 1 - clamp(ao, 0.05, 1);
+  }
+  geo.setAttribute('aoDark', new THREE.BufferAttribute(out, 1));
+  return geo;
+}
+
+/** Make a lit material respect a baked 'aoDark' vertex attribute (absent attribute = no occlusion). */
+export function withCarAO(mat) {
+  if (mat.userData.carAO) return mat;
+  mat.userData.carAO = true;
+  const prev = mat.onBeforeCompile;
+  mat.onBeforeCompile = (sh, r) => {
+    prev?.call(mat, sh, r);
+    sh.vertexShader = sh.vertexShader
+      .replace('#include <common>', '#include <common>\nattribute float aoDark;\nvarying float vAoDark;')
+      .replace('#include <begin_vertex>', '#include <begin_vertex>\nvAoDark = aoDark;');
+    sh.fragmentShader = sh.fragmentShader
+      .replace('#include <common>', '#include <common>\nvarying float vAoDark;')
+      .replace('#include <aomap_fragment>', `#include <aomap_fragment>
+      {
+        float cao = 1.0 - vAoDark;
+        reflectedLight.indirectDiffuse *= cao;
+        #if defined( USE_CLEARCOAT )
+          clearcoatSpecularIndirect *= cao;
+        #endif
+        #if defined( STANDARD )
+          float cdotNV = saturate( dot( geometryNormal, geometryViewDir ) );
+          reflectedLight.indirectSpecular *= computeSpecularOcclusion( cdotNV, cao, material.roughness );
+        #endif
+        // deep cavities (wells, under the sills) also miss most of the direct light the shadow map can't resolve
+        float cdir = mix(0.3, 1.0, smoothstep(0.0, 0.5, cao));
+        reflectedLight.directDiffuse *= cdir;
+        reflectedLight.directSpecular *= cdir;
+      }`);
+  };
+  const key = mat.customProgramCacheKey?.bind(mat);
+  mat.customProgramCacheKey = () => (key ? key() : '') + '|carAO';
+  mat.needsUpdate = true;
+  return mat;
+}
+
 export const PAINT_FINISHES = {
-  gloss: { metalness: 0.05, roughness: 0.3, clearcoat: 1, clearcoatRoughness: 0.04 },
-  metallic: { metalness: 0.62, roughness: 0.36, clearcoat: 1, clearcoatRoughness: 0.05 },
+  gloss: { metalness: 0.05, roughness: 0.3, clearcoat: 1, clearcoatRoughness: 0.025 },
+  metallic: { metalness: 0.55, roughness: 0.3, clearcoat: 1, clearcoatRoughness: 0.03 },
   pearl: { metalness: 0.35, roughness: 0.3, clearcoat: 1, clearcoatRoughness: 0.03, iridescence: 0.7, iridescenceIOR: 1.6 },
   matte: { metalness: 0.08, roughness: 0.72, clearcoat: 0, clearcoatRoughness: 0.5 },
   chrome: { metalness: 1.0, roughness: 0.07, clearcoat: 0.6, clearcoatRoughness: 0.02 },
@@ -1402,15 +1556,17 @@ export function buildPlayerCar(def, custom, plateText = 'NO HESI') {
   const mats = {
     // clear coat with a faint orange-peel ripple, so reflections waver slightly like real paint
     paint: new THREE.MeshPhysicalMaterial({ color: custom.color, envMapIntensity: 1.55, ...fin, clearcoatNormalMap: orangePeelNormal(), clearcoatNormalScale: new THREE.Vector2(0.035, 0.035) }),
-    glass: new THREE.MeshPhysicalMaterial({ color: TINTS[custom.tint ?? 1].color, metalness: 0.25, roughness: 0.03, transparent: true, opacity: TINTS[custom.tint ?? 1].opacity, envMapIntensity: 2.4, clearcoat: 1, clearcoatRoughness: 0.02, depthWrite: true }),
+    glass: new THREE.MeshPhysicalMaterial({ color: TINTS[custom.tint ?? 1].color, metalness: 0.0, roughness: 0.02, transparent: true, opacity: Math.min(0.94, TINTS[custom.tint ?? 1].opacity + 0.08), envMapIntensity: 2.8, clearcoat: 1, clearcoatRoughness: 0.01, ior: 1.52, reflectivity: 0.6, specularIntensity: 1, depthWrite: true }),
     trim: new THREE.MeshStandardMaterial({ color: 0x0d0e10, roughness: 0.55, metalness: 0.2 }),
     interior: new THREE.MeshStandardMaterial({ color: new THREE.Color(interiorFor(def).palette.seat).multiplyScalar(0.7), roughness: 0.8 }),
     chrome: new THREE.MeshStandardMaterial({ color: custom.exhaust === 'straight' ? 0x6b5fa0 : 0xd8dadc, metalness: 1, roughness: 0.18 }),
     // lamp internals: polished reflector behind clear glass by day, glowing at night
-    head: new THREE.MeshStandardMaterial({ color: 0xc4ccd4, emissive: 0xf2f6ff, emissiveIntensity: 0.02, roughness: 0.08, metalness: 0.92 }),
+    head: new THREE.MeshStandardMaterial({ map: headlampTexture(), emissiveMap: headlampTexture(), color: 0xffffff, emissive: 0xf2f6ff, emissiveIntensity: 0.02, roughness: 0.16, metalness: 0.9 }),
+    // clear polycarbonate lamp cover: adds only its reflection (black base, additive), like real lamp glass
+    cover: new THREE.MeshStandardMaterial({ color: 0x000000, roughness: 0.03, metalness: 0, envMapIntensity: 1.4, transparent: true, blending: THREE.AdditiveBlending, depthWrite: false }),
     drl: new THREE.MeshStandardMaterial({ color: 0xf4f8ff, emissive: 0xeaf2ff, emissiveIntensity: 1.1, roughness: 0.2 }),
     lens: new THREE.MeshStandardMaterial({ color: 0x0c0f13, roughness: 0.04, metalness: 0.7 }),
-    tail: new THREE.MeshStandardMaterial({ color: 0x4a0606, emissive: 0xff1a12, emissiveIntensity: 0.35, roughness: 0.15 }),
+    tail: new THREE.MeshStandardMaterial({ map: taillampTexture(), emissiveMap: taillampTexture(), color: 0xffffff, emissive: 0xff2a1a, emissiveIntensity: 0.35, roughness: 0.15 }),
     plate: new THREE.MeshStandardMaterial({ map: plateTexture(plateText, def.plate || 'ca'), roughness: 0.4 }),
     decal: new THREE.MeshPhysicalMaterial({ color: 0x07080a, roughness: 0.18, metalness: 0.35, clearcoat: 1, clearcoatRoughness: 0.05, envMapIntensity: 1.2 }),
     mesh: new THREE.MeshStandardMaterial({ map: grilleMeshTexture(), roughness: 0.62, metalness: 0.15 }),
@@ -1431,7 +1587,7 @@ export function buildPlayerCar(def, custom, plateText = 'NO HESI') {
   const meshes = {};
   mats.cabinTop = mats.paint;
   // surface patches sit a few mm off the body: bias them so they never z-fight at distance
-  for (const k of ['decal', 'mesh', 'amber', 'amberL', 'amberR', 'rev', 'head', 'drl', 'lens', 'tail', 'plate', 'chrome']) Object.assign(mats[k], { polygonOffset: true, polygonOffsetFactor: -1, polygonOffsetUnits: -2 });
+  for (const k of ['decal', 'mesh', 'amber', 'amberL', 'amberR', 'rev', 'head', 'drl', 'lens', 'tail', 'plate', 'chrome', 'cover']) Object.assign(mats[k], { polygonOffset: true, polygonOffsetFactor: -1, polygonOffsetUnits: -2 });
   for (const [k, list] of Object.entries(S)) {
     if (!list.length) continue;
     const geo = merge(list);
@@ -1441,10 +1597,12 @@ export function buildPlayerCar(def, custom, plateText = 'NO HESI') {
       for (let i = 0; i < p.count; i++) uv.setXY(i, (p.getZ(i) + p.getX(i) * 0.7) * 9, (p.getY(i) + p.getX(i) * 0.7) * 9);
       uv.needsUpdate = true;
     }
+    if (['paint', 'cabinTop', 'trim', 'kit', 'body2'].includes(k)) { bakeCarAO(geo, ctx); withCarAO(mats[k]); }
     const m = new THREE.Mesh(geo, mats[k]);
-    m.castShadow = !['glass', 'head', 'drl', 'lens', 'tail', 'rev', 'plate', 'interior', 'decal', 'mesh', 'amber', 'amberL', 'amberR'].includes(k);
+    m.castShadow = !['glass', 'head', 'drl', 'lens', 'tail', 'rev', 'plate', 'interior', 'decal', 'mesh', 'amber', 'amberL', 'amberR', 'cover'].includes(k);
     m.receiveShadow = ['paint', 'trim', 'kit', 'cabinTop', 'decal', 'mesh', 'interior'].includes(k);
     if (k === 'glass') m.renderOrder = 2;
+    if (k === 'cover') m.renderOrder = 3;
     body.add(m);
     meshes[k] = m;
   }
@@ -1455,7 +1613,7 @@ export function buildPlayerCar(def, custom, plateText = 'NO HESI') {
   for (const a of axles) {
     for (const sx of [-1, 1]) {
       const pivot = new THREE.Group();
-      pivot.position.set(sx * ctx.track / 2, a.r, a.z);
+      pivot.position.set(sx * (ctx.trackAt ? ctx.trackAt(a.z) : ctx.track) / 2, a.r, a.z);
       const flip = new THREE.Group();
       if (sx < 0) flip.rotation.y = Math.PI;
       pivot.add(flip);
@@ -1510,7 +1668,7 @@ export function disposeCar(car) {
     if (o.isMesh) o.geometry.dispose();
   });
   for (const m of new Set(Object.values(car.mats))) {
-    if (m.map && m.map !== blobShadowTexture() && m.map !== grilleMeshTexture() && m.map !== tireTexture()) m.map.dispose();
+    if (m.map && m.map !== blobShadowTexture() && m.map !== grilleMeshTexture() && m.map !== tireTexture() && m.map !== headlampTexture() && m.map !== taillampTexture()) m.map.dispose();
     m.dispose();
   }
 }

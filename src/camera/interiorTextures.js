@@ -523,3 +523,72 @@ export function orangePeelNormal() {
   x.putImageData(img, 0, 0);
   return (cache.peel = tex(c, { srgb: false }));
 }
+
+/**
+ * Headlamp internals atlas (512 x 128). u 0..0.75: a slim lamp (gunmetal housing, two chrome reflector bowls
+ * around the projector positions, faceted reflector lines, a light-guide edge); u 0.75..1: a round lamp
+ * (concentric reflector rings). Used as colour + emissive map, so at night only the reflectors glow.
+ */
+export function headlampTexture() {
+  if (cache.headlamp) return cache.headlamp;
+  const c = canvas(512, 128), x = c.getContext('2d');
+  const bg = x.createLinearGradient(0, 0, 0, 128);
+  bg.addColorStop(0, '#3b4148');
+  bg.addColorStop(1, '#16191d');
+  x.fillStyle = bg;
+  x.fillRect(0, 0, 512, 128);
+  // faceted reflector lines
+  x.fillStyle = 'rgba(120,130,142,0.28)';
+  for (let y = 4; y < 128; y += 7) x.fillRect(0, y, 384, 1);
+  const bowl = (cx, cy, R, rings) => {
+    const g = x.createRadialGradient(cx, cy, 0, cx, cy, R);
+    for (const [s, col] of rings) g.addColorStop(s, col);
+    x.fillStyle = g;
+    x.beginPath();
+    x.ellipse(cx, cy, R, R, 0, 0, Math.PI * 2);
+    x.fill();
+  };
+  const slimRings = [[0, '#0b0d10'], [0.34, '#0e1013'], [0.4, '#f4f7fa'], [0.5, '#c3cad2'], [0.72, '#5c646d'], [0.92, '#2b3036'], [1, 'rgba(43,48,54,0)']];
+  for (const f of [0.28, 0.6]) bowl(f * 384, 66, 58, slimRings);
+  // chrome outline ring around each bowl
+  x.strokeStyle = 'rgba(235,240,246,0.7)';
+  x.lineWidth = 2;
+  for (const f of [0.28, 0.6]) { x.beginPath(); x.arc(f * 384, 66, 50, 0, Math.PI * 2); x.stroke(); }
+  // light guide along the top edge and a chrome inner frame
+  x.fillStyle = '#e4ebf2';
+  x.fillRect(6, 9, 372, 3);
+  x.fillStyle = 'rgba(210,218,226,0.6)';
+  x.fillRect(0, 0, 384, 2);
+  x.fillRect(0, 126, 384, 2);
+  // round lamp
+  x.fillStyle = '#16191d';
+  x.fillRect(384, 0, 128, 128);
+  bowl(448, 64, 64, [[0, '#0b0d10'], [0.3, '#0f1114'], [0.36, '#e9eef3'], [0.58, '#9aa3ad'], [0.84, '#4a5159'], [1, '#2a2e33']]);
+  return (cache.headlamp = tex(c, { srgb: true, repeat: false }));
+}
+
+/** Tail-lamp lens (256 x 64): dark red with a grid of LED cells and a light-guide line, as colour + emissive map. */
+export function taillampTexture() {
+  if (cache.taillamp) return cache.taillamp;
+  const c = canvas(256, 64), x = c.getContext('2d');
+  const bg = x.createLinearGradient(0, 0, 0, 64);
+  bg.addColorStop(0, '#5a0808');
+  bg.addColorStop(0.5, '#2c0404');
+  bg.addColorStop(1, '#430606');
+  x.fillStyle = bg;
+  x.fillRect(0, 0, 256, 64);
+  // optic cells: each a small bright core in a darker pocket
+  for (let j = 0; j < 4; j++) for (let i = 0; i < 24; i++) {
+    const cx = 6 + i * 10.4 + (j % 2) * 5, cy = 10 + j * 14;
+    const g = x.createRadialGradient(cx, cy, 0, cx, cy, 6);
+    g.addColorStop(0, '#ff4a3a');
+    g.addColorStop(0.45, '#b01410');
+    g.addColorStop(1, 'rgba(60,6,6,0)');
+    x.fillStyle = g;
+    x.fillRect(cx - 6, cy - 6, 12, 12);
+  }
+  // light guide
+  x.fillStyle = '#ff3a2c';
+  x.fillRect(0, 2, 256, 3);
+  return (cache.taillamp = tex(c, { srgb: true, repeat: false }));
+}

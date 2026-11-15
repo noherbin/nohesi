@@ -2,7 +2,7 @@
 // turn signals, brake lights, reactions to the player, and an oncoming carriageway.
 import * as THREE from 'three';
 import { TRAFFIC_TYPES, TRAFFIC_COLORS } from '../config/cars.js';
-import { buildTrafficGeometry } from '../vehicles/carBuilder.js';
+import { buildTrafficGeometry, withCarAO } from '../vehicles/carBuilder.js';
 import { blobShadowTexture, plateTexture, beamTexture, streakTexture } from '../world/textures.js';
 import { clamp, lerp, weightedPick, MPH_TO_MS, smoothstep } from '../core/utils.js';
 
@@ -30,6 +30,7 @@ export class Traffic {
       body2: new THREE.MeshStandardMaterial({ color: 0xe9e9e6, roughness: 0.62, metalness: 0.05 }),
       shadow: new THREE.MeshBasicMaterial({ map: blobShadowTexture(), color: 0x000000, transparent: true, opacity: 0.6, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -4 }),
     };
+    for (const k of ['paint', 'dark', 'body2']) withCarAO(this.mats[k]);
     this.types = TRAFFIC_TYPES.map((def, ti) => {
       const g = buildTrafficGeometry(def);
       const cap = CAPS[def.id] || 10;
