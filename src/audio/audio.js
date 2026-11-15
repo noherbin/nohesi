@@ -376,6 +376,12 @@ export class AudioSystem {
     for (const [i, f] of [523, 659, 784, 1047].entries()) this._tone('triangle', f, f, 0.32, 0.08, this.sfxBus, i * 0.07);
   }
 
+  /** Turn-signal relay: a short tick on, a softer tock off. */
+  tick(on) {
+    if (!this.ready) return;
+    this._tone('square', on ? 2100 : 1500, on ? 1700 : 1200, 0.014, on ? 0.035 : 0.022, this.sfxBus);
+  }
+
   click() {
     if (!this.ready) return;
     this._tone('triangle', 1400, 900, 0.04, 0.06, this.sfxBus);

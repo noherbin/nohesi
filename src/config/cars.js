@@ -188,7 +188,7 @@ export const PLAYER_CARS = [
       downforce: 0.6, rollGain: 0.0045, susFreq: 2.1, turboLag: 0, shiftTime: 0.08,
     },
     engine: { type: 'v10', label: '5.2L V10' },
-    defaults: { color: '#7cc42d', finish: 'pearl', wheels: 'turbine', rimColor: '#1a1a1c', tint: 2, suspension: 'stock', spoiler: 'none', kit: 'aggressive', exhaust: 'stock', caliper: '#c8102e' },
+    defaults: { color: '#7cc42d', finish: 'pearl', wheels: 'yspoke', rimColor: '#1a1a1c', tint: 2, suspension: 'stock', spoiler: 'none', kit: 'aggressive', exhaust: 'stock', caliper: '#c8102e' },
   },
   {
     id: 'aether',
@@ -215,7 +215,7 @@ export const PLAYER_CARS = [
       downforce: 1.0, rollGain: 0.004, susFreq: 2.2, turboLag: 0.4, shiftTime: 0.06,
     },
     engine: { type: 'v8flat', turbo: true, label: '5.0L Twin-Turbo V8' },
-    defaults: { color: '#14161a', finish: 'gloss', wheels: 'turbine', rimColor: '#c9a34a', tint: 3, suspension: 'stock', spoiler: 'gt', kit: 'aggressive', exhaust: 'sport', caliper: '#c9a34a' },
+    defaults: { color: '#14161a', finish: 'gloss', wheels: 'center', rimColor: '#c9a34a', tint: 3, suspension: 'stock', spoiler: 'gt', kit: 'aggressive', exhaust: 'sport', caliper: '#c9a34a' },
   },
 ];
 
@@ -224,7 +224,7 @@ export const CAR_BY_ID = Object.fromEntries(PLAYER_CARS.map((c) => [c.id, c]));
 export const CUSTOM_OPTIONS = {
   colors: ['#f2f2f0', '#c9cfd4', '#7d848b', '#2b2f33', '#0c0d0f', '#b3121c', '#e05a12', '#f2c230', '#7cc42d', '#0f7a4a', '#1d4fbf', '#38b6e0', '#5b2d8f', '#e04f9a', '#8a6a3c', '#c9a34a'],
   finishes: [['gloss', 'Gloss'], ['metallic', 'Metallic'], ['pearl', 'Pearl'], ['matte', 'Matte'], ['chrome', 'Chrome']],
-  wheels: [['five', '5-Spoke'], ['split', 'Split Spoke'], ['mesh', 'Mesh'], ['multi', 'Multi-Spoke'], ['deep', 'Deep Dish'], ['turbine', 'Turbine']],
+  wheels: [['five', '5-Spoke'], ['split', 'Split Spoke'], ['mesh', 'Mesh'], ['multi', 'Multi-Spoke'], ['deep', 'Deep Dish'], ['turbine', 'Turbine'], ['yspoke', 'Y-Spoke'], ['center', 'Centre-Lock']],
   rimColors: ['#c9ccd0', '#5c6066', '#1a1a1c', '#c9a34a', '#8a5a2c', '#f2f2f0'],
   calipers: ['#c8102e', '#e8c21c', '#1f4ea3', '#1a1a1c', '#c9a34a', '#7cc42d'],
   tints: [['0', 'Light'], ['1', 'Medium'], ['2', 'Dark'], ['3', 'Limo']],

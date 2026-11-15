@@ -538,6 +538,12 @@ export class Game {
         this._applyHudMode();
       }
       if (I.take('reset')) this._resetCar();
+      if (I.take('indLeft')) this._setIndicator(-1);
+      if (I.take('indRight')) this._setIndicator(1);
+      if (I.take('dome')) {
+        this.dome = !this.dome;
+        this.ui.toast(this.dome ? 'Interior light on' : 'Interior light off');
+      }
     } else if (st === 'paused') {
       if (I.take('pause') || I.take('back')) this.resume();
       this._menuNav();
@@ -568,6 +574,14 @@ export class Game {
         navigator.keyboard?.lock?.(['KeyW', 'KeyA', 'KeyS', 'KeyD', 'KeyQ', 'KeyE', 'ControlLeft', 'ControlRight', 'Space']).catch(() => {});
       }).catch(() => this.ui.toast('Fullscreen is not available here'));
     } else d.exitFullscreen?.();
+  }
+
+  /** Turn signal: press the same side again (or the other side) to switch over / off. */
+  _setIndicator(side) {
+    this.indicator = side && this.indicator !== side ? side : 0;
+    this.indT = 0;
+    this.blinkOn = false;
+    this.indD0 = this.player.proj.d;
   }
 
   _resetCar() {
@@ -620,6 +634,15 @@ export class Game {
       if (this.input.take('gearDown')) P.shiftDown();
     }
     car.step(dt, inp);
+    // turn signals: blink at ~80/min with a relay tick; cancel once the lane change is done (or after 15 s)
+    if (!attract && this.indicator) {
+      this.indT += dt;
+      const on = this.indT % 0.75 < 0.4;
+      if (on !== this.blinkOn) { this.blinkOn = on; this.audio.tick(on); }
+      if ((Math.abs(car.proj.d - this.indD0) > 2.8 && Math.abs(car.steer ?? 0) < 0.08) || this.indT > 15) this._setIndicator(0);
+    } else if (!this.indicator) this.blinkOn = false;
+    car.indicator = attract ? 0 : this.indicator || 0;
+    car.blinkOn = !!this.blinkOn;
     // collisions
     this.crashCD -= dt;
     let scrape = 0;
@@ -906,7 +929,7 @@ export class Game {
     // cockpit
     this.cockpit.setVisible(inside);
     if (inside) {
-      this.cockpit.update(dt, car, { night, units: this.S.units, road: this.road, hours: sky.hours, rain: sky.rainAmt, manual: this.S.transmission === 'manual' });
+      this.cockpit.update(dt, car, { night, units: this.S.units, road: this.road, hours: sky.hours, rain: sky.rainAmt, manual: this.S.transmission === 'manual', indicator: car.indicator, blink: car.blinkOn, handbrake: (car.hb ?? 0) > 0.3, dome: this.dome });
       if (this.Q.mirror) this.cockpit.renderMirror(this.renderer, this.scene, car);
     }
     // audio
@@ -1024,6 +1047,9 @@ export class Game {
         const k = (0.25 + night * 0.4 + brake * 0.8) * dayK;
         G.add(t.x, t.y, t.z, k, k * 0.07, k * 0.04, 0.5 + brake * 0.45);
       }
+      // blinking corner lamps and reversing lamps
+      if (car.indicator && car.blinkOn) for (const t of car.lampWorld(car.model.lamps.ind.filter((l) => Math.sign(l[0]) === car.indicator), [])) G.add(t.x, t.y, t.z, 1, 0.5, 0.05, 0.5);
+      if (car.phys.gear === -1 && car.model.lamps.rev) for (const t of car.lampWorld(car.model.lamps.rev, [])) G.add(t.x, t.y, t.z, 0.9, 0.92, 0.95, 0.55);
       if (car.headOn > 0.1 && this.camRig.mode !== 'bumper') {
         // seen from behind (chase cams) the player's headlights only show as a faint spill
         const heads = car.lampWorld(car.model.lamps.head, []);

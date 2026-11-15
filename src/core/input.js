@@ -11,6 +11,7 @@ const KEYMAP = {
   ShiftLeft: 'gearUp', ShiftRight: 'gearUp', KeyE: 'gearUp',
   ControlLeft: 'gearDown', ControlRight: 'gearDown', KeyQ: 'gearDown',
   KeyB: 'lookBack', KeyH: 'hud', KeyM: 'music', KeyF: 'fullscreen',
+  KeyZ: 'indLeft', KeyX: 'indRight', KeyL: 'dome',
 };
 const PREVENT = new Set(['Space', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'ControlLeft', 'ControlRight']);
 

@@ -845,13 +845,23 @@ export function tireTexture() {
   const band = (v0, v1) => [(1 - v1) * H, (1 - v0) * H];
   // tread (segments 3..4): circumferential grooves plus sipes
   const [t0, t1] = band(3 / 7, 4 / 7);
-  x.fillStyle = '#121213';
-  for (const f of [0.18, 0.42, 0.66, 0.86]) x.fillRect(0, t0 + (t1 - t0) * f, W, 2.5);
-  x.fillStyle = '#161617';
-  for (let i = 0; i < 180; i++) {
-    const px = (i / 180) * W;
-    x.fillRect(px, t0 + 2, 2, (t1 - t0) * 0.16);
-    x.fillRect(px + 5, t1 - (t1 - t0) * 0.14, 2, (t1 - t0) * 0.12);
+  // directional performance tread: three circumferential grooves, swept V grooves on the shoulders,
+  // a solid centre rib and fine sipes
+  const th = t1 - t0;
+  x.fillStyle = '#0f0f10';
+  for (const f of [0.3, 0.5, 0.7]) x.fillRect(0, t0 + th * f - 1.5, W, 3);
+  x.strokeStyle = '#121213';
+  x.lineWidth = 3;
+  for (let i = 0; i < 96; i++) {
+    const px = (i / 96) * W;
+    x.beginPath(); x.moveTo(px, t0 + th * 0.02); x.lineTo(px + 14, t0 + th * 0.3); x.stroke();
+    x.beginPath(); x.moveTo(px, t1 - th * 0.02); x.lineTo(px + 14, t1 - th * 0.3); x.stroke();
+  }
+  x.fillStyle = '#151516';
+  for (let i = 0; i < 240; i++) {
+    const px = (i / 240) * W;
+    x.fillRect(px, t0 + th * 0.36, 1.2, th * 0.1);
+    x.fillRect(px + 4, t0 + th * 0.54, 1.2, th * 0.1);
   }
   // outer sidewall (segment 6..7) lettering, twice around
   const [s0, s1] = band(6 / 7, 7 / 7);

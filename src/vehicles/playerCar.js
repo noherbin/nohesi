@@ -174,6 +174,11 @@ export class PlayerCar {
     m.mats.tail.emissiveIntensity = 0.35 + this.headOn * 0.9 + this.brakeLight * 3.2;
     m.mats.head.emissiveIntensity = 0.02 + this.headOn * 2.4;
     m.mats.drl.emissiveIntensity = 1.1 + this.headOn * 0.9;
+    // turn signals (side repeaters) and reversing lamps
+    const ind = this.indicator || 0, on = !!this.blinkOn;
+    m.mats.amberL.emissiveIntensity = ind < 0 && on ? 3 : 0.25;
+    m.mats.amberR.emissiveIntensity = ind > 0 && on ? 3 : 0.25;
+    m.mats.rev.emissiveIntensity = P.gear === -1 ? 2.2 : 0;
     for (const s of this.spots) s.intensity = this.headOn * 70;
   }
 
