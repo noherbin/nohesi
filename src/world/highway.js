@@ -225,10 +225,11 @@ export class Highway {
     for (const kind of new Set(env.props.buildingKinds)) {
       const [w, h, d, fpt, bpt] = protos[kind];
       const ft = T.facadeTextures(kind, bseed++);
-      this.textures.push(ft.map, ft.emissive);
+      this.textures.push(ft.map, ft.emissive, ft.rm);
+      // glass reflects the sky, walls stay matte: roughness/metalness come from the facade's RM map
       const mat = new THREE.MeshStandardMaterial({
         map: ft.map, emissiveMap: ft.emissive, emissive: 0xffffff, emissiveIntensity: 0,
-        roughness: kind === 'glass' || kind === 'tall' ? 0.25 : 0.85, metalness: kind === 'glass' || kind === 'tall' ? 0.5 : 0.05,
+        roughnessMap: ft.rm, metalnessMap: ft.rm, roughness: 1, metalness: 1, envMapIntensity: 1.1,
       });
       // a few silhouettes per kind: setbacks, cornices, rooftop plant, masts
       const variants = [];

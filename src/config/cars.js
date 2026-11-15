@@ -17,7 +17,7 @@ export const PLAYER_CARS = [
       sect: { s: 0.46, nt: 3.0, nb: 7 },
       cabin: { t0: 0.325, t1: 0.445, t2: 0.685, t3: 0.81, roof: 1.47, wBot: 0.86, tumble: 0.2, tB: 0.565 },
       lights: { head: 'slim', headY: 0.66, headX: 0.6, tail: 'split', tailY: 0.9, tailX: 0.58 },
-      grille: 'wide', scoop: 0.17, exhaust: 'quad', deckT: 0.95,
+      grille: 'hex', fog: true, scoop: 0.17, exhaust: 'quad', deckT: 0.95,
     },
     phys: {
       mass: 1520, hp: 310, redline: 6800, limiter: 7100, idle: 850, curve: 'turbo',
@@ -44,7 +44,7 @@ export const PLAYER_CARS = [
       sect: { s: 0.46, nt: 3.0, nb: 7 },
       cabin: { t0: 0.32, t1: 0.45, t2: 0.63, t3: 0.97, roof: 1.42, wBot: 0.85, tumble: 0.22, tB: 0.54, quarter: 0.86, rearCurve: 1.6 },
       lights: { head: 'slim', headY: 0.66, headX: 0.64, tail: 'split', tailY: 0.9, tailX: 0.62, tailW: 0.38 },
-      grille: 'wide', exhaust: 'center', deckT: 0.93,
+      grille: 'slot', fog: true, exhaust: 'center', deckT: 0.93,
     },
     phys: {
       mass: 1390, hp: 320, redline: 7000, limiter: 7300, idle: 900, curve: 'turbo',
@@ -71,7 +71,7 @@ export const PLAYER_CARS = [
       sect: { s: 0.5, nt: 2.6, nb: 6 },
       cabin: { t0: 0.37, t1: 0.5, t2: 0.62, t3: 0.91, roof: 1.23, wBot: 0.8, tumble: 0.3, quarter: 0.73, rearCurve: 1.1, crown: 0.04 },
       lights: { head: 'popup', headY: 0.52, headX: 0.56, tail: 'round', tailY: 0.76, tailX: 0.58 },
-      grille: 'wide', grilleY: 0.12, exhaust: 'dual', deckT: 0.95,
+      grille: 'mouth', exhaust: 'dual', deckT: 0.95,
     },
     phys: {
       mass: 1290, hp: 360, redline: 8200, limiter: 8500, idle: 950, curve: 'turbo',
@@ -124,8 +124,8 @@ export const PLAYER_CARS = [
       plan: { f: 0.08, r: 0.07, fp: 2.2, rp: 2.2, hips: 0.07, waist: 0.03 },
       sect: { s: 0.5, nt: 2.5, nb: 6 },
       cabin: { t0: 0.34, t1: 0.47, t2: 0.58, t3: 0.975, roof: 1.3, wBot: 0.82, tumble: 0.26, quarter: 0.72, rearCurve: 1.5, crown: 0.04 },
-      lights: { head: 'round', headY: 0.68, headX: 0.62, tail: 'bar', tailY: 0.88, tailH: 0.05 },
-      grille: 'super', grilleY: 0.24, exhaust: 'center', deckT: 0.95,
+      lights: { head: 'round', headY: 0.6, headX: 0.6, tail: 'bar', tailY: 0.88, tailH: 0.05 },
+      grille: 'lower3', exhaust: 'center', deckT: 0.95,
     },
     phys: {
       mass: 1530, hp: 540, redline: 7500, limiter: 7600, idle: 850, curve: 'turbo',
@@ -152,7 +152,7 @@ export const PLAYER_CARS = [
       sect: { s: 0.5, nt: 3.6, nb: 8 },
       cabin: { t0: 0.41, t1: 0.52, t2: 0.64, t3: 0.88, roof: 1.38, wBot: 0.84, tumble: 0.24, quarter: 0.7, rearCurve: 1.2 },
       lights: { head: 'slim', headY: 0.77, headX: 0.68, headW: 0.36, headH: 0.08, tail: 'tri', tailY: 0.9, tailX: 0.62 },
-      grille: 'wide', grilleY: 0.32, scoop: 0.2, exhaust: 'quad', deckT: 0.96,
+      grille: 'trap', grilleY: 0.46, scoop: 0.2, exhaust: 'quad', deckT: 0.96,
     },
     phys: {
       mass: 1880, hp: 760, redline: 6500, limiter: 6600, idle: 750, curve: 'sc',
@@ -179,7 +179,7 @@ export const PLAYER_CARS = [
       sect: { s: 0.48, nt: 2.4, nb: 6 },
       cabin: { t0: 0.26, t1: 0.43, t2: 0.56, t3: 0.86, roof: 1.17, wBot: 0.78, tumble: 0.3, quarter: 0.66, rearCurve: 0.85, crown: 0.03, wsCurve: 0.7 },
       lights: { head: 'wide', headY: 0.56, headX: 0.66, headW: 0.38, headH: 0.05, tail: 'bar', tailY: 0.86, tailH: 0.04 },
-      grille: 'super', grilleY: 0.14, exhaust: 'center', deckT: 0.96,
+      grille: 'super', grilleY: 0.14, sideIntake: true, exhaust: 'center', deckT: 0.96,
     },
     phys: {
       mass: 1420, hp: 640, redline: 8500, limiter: 8700, idle: 1000, curve: 'na',
@@ -206,7 +206,7 @@ export const PLAYER_CARS = [
       sect: { s: 0.46, nt: 2.2, nb: 5.5 },
       cabin: { t0: 0.28, t1: 0.43, t2: 0.55, t3: 0.78, roof: 1.15, wBot: 0.72, tumble: 0.32, quarter: 0.62, rearCurve: 0.9, crown: 0.04, wsCurve: 0.7 },
       lights: { head: 'wide', headY: 0.58, headX: 0.7, headW: 0.34, headH: 0.05, tail: 'bar', tailY: 0.84, tailH: 0.035 },
-      grille: 'super', grilleY: 0.12, exhaust: 'center', deckT: 0.95,
+      grille: 'super', grilleY: 0.12, sideIntake: true, exhaust: 'center', deckT: 0.95,
     },
     phys: {
       mass: 1430, hp: 1150, redline: 8250, limiter: 8400, idle: 950, curve: 'turbo',

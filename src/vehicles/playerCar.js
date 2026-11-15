@@ -172,7 +172,8 @@ export class PlayerCar {
     const lit = smoothstep(0.15, 0.6, night + wet * 0.3);
     this.headOn = damp(this.headOn, lit, 3, dt);
     m.mats.tail.emissiveIntensity = 0.35 + this.headOn * 0.9 + this.brakeLight * 3.2;
-    m.mats.head.emissiveIntensity = 0.3 + this.headOn * 3.0;
+    m.mats.head.emissiveIntensity = 0.02 + this.headOn * 2.4;
+    m.mats.drl.emissiveIntensity = 1.1 + this.headOn * 0.9;
     for (const s of this.spots) s.intensity = this.headOn * 70;
   }
 

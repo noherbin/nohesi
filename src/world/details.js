@@ -15,7 +15,7 @@ function facadeBox(w, h, d, x, y0, z, fpt, bpt) {
   const tileH = 3.6 * fpt, tileW = 4 * bpt;
   for (let i = 0; i < uv.count; i++) {
     const nx = Math.abs(nrm.getX(i)), ny = Math.abs(nrm.getY(i));
-    if (ny > 0.5) uv.setXY(i, 0.02, 0.02);
+    if (ny > 0.5) uv.setXY(i, 0.004, 0.5);
     else uv.setXY(i, (nx > 0.5 ? pos.getZ(i) : pos.getX(i)) / tileW, pos.getY(i) / tileH);
   }
   return g;
@@ -24,7 +24,7 @@ function facadeBox(w, h, d, x, y0, z, fpt, bpt) {
 /** Plain parts (roof plant, ledges): UVs pinned to the facade's plain corner. */
 function plain(g) {
   const uv = g.attributes.uv;
-  for (let i = 0; i < uv.count; i++) uv.setXY(i, 0.02, 0.02);
+  for (let i = 0; i < uv.count; i++) uv.setXY(i, 0.004, 0.5);
   return g;
 }
 

@@ -181,7 +181,7 @@ export function buildingGeometry(w, h, d, floorsPerTile, baysPerTile) {
     const nx = Math.abs(nrm.getX(i)), ny = Math.abs(nrm.getY(i));
     const x = pos.getX(i), y = pos.getY(i), z = pos.getZ(i);
     if (ny > 0.5) {
-      uv.setXY(i, 0.02, 0.02); // roof: sample a plain corner
+      uv.setXY(i, 0.004, 0.5); // roof: sample a plain corner
     } else {
       const horiz = nx > 0.5 ? z : x;
       uv.setXY(i, horiz / tileW, y / tileH);

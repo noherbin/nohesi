@@ -82,7 +82,8 @@ export class GarageScene {
     }
     this.car = buildPlayerCar(def, custom, plate);
     this.car.root.position.y = 0.08;
-    this.car.mats.head.emissiveIntensity = 1.2;
+    this.car.mats.head.emissiveIntensity = 0.15;
+    this.car.mats.drl.emissiveIntensity = 1.6;
     this.car.mats.tail.emissiveIntensity = 1.4;
     this.table.add(this.car.root);
     this.def = def;
