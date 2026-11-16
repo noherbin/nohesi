@@ -4,6 +4,7 @@ import { ENVIRONMENTS, ENV_ORDER, TIMES, WEATHERS, DENSITIES } from '../config/e
 import { CHALLENGES, GOAL_LABEL } from '../config/challenges.js';
 import { formatInt, M_TO_MI } from '../core/utils.js';
 import { BOARDS, cleanName } from '../gameplay/leaderboard.js';
+import { money, PRICED } from '../gameplay/economy.js';
 
 const $ = (id) => document.getElementById(id);
 const h = (tag, cls, html) => {
@@ -91,6 +92,7 @@ export class UI {
       if (screen === 'custom') this.garageSel = this.garageSel && g.isUnlocked(this.garageSel) ? this.garageSel : g.save.selectedCar;
     }
     if (screen === 'settings' && this.screen !== 'pause' && this.screen !== 'settings') this.settingsReturn = 'menu';
+    if (screen !== 'custom') this.cuPreview = null; // leaving the shop drops an unbought preview
     this.show(screen);
     if (screen === 'menu') this.renderMenu();
     if (screen === 'setup') this.renderSetup();
@@ -167,7 +169,7 @@ export class UI {
   /* ------------------------------------------------------------ menu */
   renderMenu() {
     const g = this.game;
-    $('m-career').textContent = formatInt(g.save.career);
+    $('m-career').textContent = money(g.econ.cash);
     $('m-best').textContent = formatInt(g.save.best.endless);
     $('m-car').textContent = CAR_BY_ID[g.save.selectedCar].name;
   }
@@ -221,8 +223,9 @@ export class UI {
     for (const car of PLAYER_CARS) {
       const un = g.isUnlocked(car.id);
       const cur = g.save.selectedCar === car.id;
+      const afford = g.econ.canAfford(car.cost);
       const b = h('button', 'car-item' + (this.garageSel === car.id ? ' sel' : '') + (un ? '' : ' locked'),
-        `<div><div class="n">${car.name}</div><div class="k">${car.cls}</div></div><div class="tag ${cur ? 'cur' : ''}">${cur ? 'SELECTED' : un ? '' : '🔒 ' + formatInt(car.cost)}</div>`);
+        `<div><div class="n">${car.name}</div><div class="k">${car.cls}</div></div><div class="tag ${cur ? 'cur' : un ? '' : afford ? 'buy' : 'price'}">${cur ? 'SELECTED' : un ? 'OWNED' : money(car.cost)}</div>`);
       b.onclick = () => {
         g.audio.click();
         this.garageSel = car.id;
@@ -253,18 +256,35 @@ export class UI {
       stats.appendChild(h('div', 'stat-row', `<span>${k}</span>${f >= 0 ? `<div class="stat-bar"><i style="width:${Math.max(4, Math.min(100, f * 100))}%"></i></div>` : '<div></div>'}<b>${v}</b>`));
     }
     const un = g.isUnlocked(car.id);
+    const afford = g.econ.canAfford(car.cost);
     const sel = $('btn-select');
-    sel.disabled = !un;
-    sel.textContent = g.save.selectedCar === car.id ? 'SELECTED' : un ? 'SELECT' : 'LOCKED';
+    sel.disabled = !un && !afford;
+    sel.textContent = g.save.selectedCar === car.id ? 'SELECTED' : un ? 'SELECT' : `BUY · ${money(car.cost)}`;
     $('btn-tocustom').classList.toggle('hidden', !un);
+    $('g-cash').textContent = money(g.econ.cash);
     const lock = $('ci-lock');
     lock.classList.toggle('hidden', un);
-    if (!un) lock.textContent = `Unlocks at ${formatInt(car.cost)} career points (you have ${formatInt(g.save.career)}). Earn points in any mode.`;
+    if (!un) {
+      lock.textContent = afford
+        ? `You have ${money(g.econ.cash)}. Buying it leaves ${money(g.econ.cash - car.cost)}.`
+        : `You need ${money(car.cost - g.econ.cash)} more. Earn cash in Endless, Time Attack and Challenges: $1 for every point you score, plus pay for distance driven.`;
+    }
   }
 
   _selectCar() {
     const g = this.game;
-    if (!g.isUnlocked(this.garageSel)) return;
+    const id = this.garageSel, car = CAR_BY_ID[id];
+    if (!g.isUnlocked(id)) {
+      if (!g.econ.canAfford(car.cost)) return;
+      g.audio.click();
+      this.confirm(`BUY THE ${car.name.toUpperCase()}?`, `${money(car.cost)} · you have ${money(g.econ.cash)}, leaving ${money(g.econ.cash - car.cost)}.`, () => {
+        if (!g.econ.buyCar(id)) return;
+        g.audio.bigChime();
+        this.toast(`PURCHASED · ${car.name.toUpperCase()}`, 'gold');
+        this._selectCar();
+      });
+      return;
+    }
     g.audio.click();
     g.save.selectedCar = this.garageSel;
     g.saveNow();
@@ -279,18 +299,52 @@ export class UI {
     const id = this.garageSel || g.save.selectedCar;
     const car = CAR_BY_ID[id];
     const cu = g.getCustom(id);
+    // an unbought part being tried on: shown on the car, not saved until bought
+    const pv = this.cuPreview && this.cuPreview.id === id ? this.cuPreview : null;
+    const view = pv ? { ...cu, [pv.key]: pv.val } : cu;
     $('cu-car').textContent = car.name.toUpperCase();
-    g.showGarageCar(id);
+    $('cu-cash').textContent = money(g.econ.cash);
+    if (pv) g.previewCustom(id, view);
+    else g.showGarageCar(id);
     const tabs = [['paint', 'PAINT'], ['wheels', 'WHEELS'], ['body', 'AERO & KIT'], ['stance', 'STANCE & TINT'], ['exhaust', 'EXHAUST'], ['plate', 'PLATE']];
     const te = $('cu-tabs');
     te.innerHTML = '';
     for (const [k, n] of tabs) {
       const b = h('button', 'tab' + (this.cuTab === k ? ' sel' : ''), n);
-      b.onclick = () => { this.cuTab = k; g.audio.click(); this.renderCustom(); };
+      b.onclick = () => { this.cuTab = k; this.cuPreview = null; g.audio.click(); this.renderCustom(); };
       te.appendChild(b);
     }
     const body = $('cu-body');
     body.innerHTML = '';
+    if (pv) {
+      const price = g.econ.price(pv.key, pv.val), afford = g.econ.canAfford(price);
+      const bar = h('div', 'buybar');
+      const info = h('div', 'bb-info');
+      const t = h('b');
+      t.textContent = pv.name.toUpperCase();
+      const pr = h('span', 'bb-price');
+      pr.textContent = money(price);
+      info.append(t, pr);
+      const note = h('div', 'bb-note');
+      note.textContent = afford ? `Trying it on · you have ${money(g.econ.cash)}` : `Trying it on · you need ${money(price - g.econ.cash)} more`;
+      const btns = h('div', 'bb-btns');
+      const buy = h('button', 'btn primary small', afford ? 'BUY &amp; FIT' : 'NOT ENOUGH CASH');
+      buy.disabled = !afford;
+      buy.onclick = () => {
+        if (!g.econ.buyPart(id, pv.key, pv.val)) return;
+        g.audio.bigChime();
+        this.toast(`PURCHASED · ${pv.name.toUpperCase()}`, 'gold');
+        this.cuPreview = null;
+        cu[pv.key] = pv.val;
+        g.setCustom(id, cu, true);
+        this.renderCustom();
+      };
+      const cancel = h('button', 'btn ghost small', 'CANCEL');
+      cancel.onclick = () => { g.audio.click(); this.cuPreview = null; this.renderCustom(); };
+      btns.append(buy, cancel);
+      bar.append(info, note, btns);
+      body.appendChild(bar);
+    }
     const O = CUSTOM_OPTIONS;
     const set = (k, v, rebuild = true) => {
       cu[k] = v;
@@ -313,10 +367,23 @@ export class UI {
     const chips = (title, list, key, rebuild = true, numeric = false) => {
       body.appendChild(h('h3', '', title));
       const w = h('div', 'chips');
+      const priced = PRICED.includes(key);
       for (const [v, n] of list) {
         const val = numeric ? +v : v;
-        const b = h('button', 'chip' + (cu[key] === val ? ' sel' : ''), n);
-        b.onclick = () => { g.audio.click(); set(key, val, rebuild); };
+        const owned = !priced || g.econ.ownsPart(id, key, val);
+        const isPv = pv && pv.key === key && pv.val === val;
+        const b = h('button', 'chip' + (view[key] === val ? ' sel' : '') + (isPv ? ' preview' : '') + (owned ? '' : ' forsale'));
+        b.textContent = n;
+        if (priced) {
+          const sm = h('small');
+          sm.textContent = owned ? (cu[key] === val ? 'FITTED' : 'OWNED') : money(g.econ.price(key, val));
+          b.appendChild(sm);
+        }
+        b.onclick = () => {
+          g.audio.click();
+          if (owned) { this.cuPreview = null; set(key, val, rebuild); }
+          else { this.cuPreview = { id, key, val, name: n }; this.renderCustom(); }
+        };
         w.appendChild(b);
       }
       body.appendChild(w);
@@ -339,7 +406,7 @@ export class UI {
     } else if (this.cuTab === 'body') {
       chips('SPOILER', O.spoilers, 'spoiler');
       chips('BODY KIT', O.kits, 'kit');
-      body.appendChild(h('p', 'c-d', '<span style="color:#8d949c;font-size:13px">Wings and aggressive kits add downforce: more grip at speed, slightly lower top speed feel.</span>'));
+      body.appendChild(h('p', 'c-d', '<span style="color:#8d949c;font-size:13px">Tokyo Rivet is a bolt-on riveted widebody with a front splitter, canards and a ducktail; Outlaw Works adds huge boxy riveted over-fenders and a GT wing. Both widen the track and fit fatter tyres, and bring their own spoiler unless you fit another one. Wings and aggressive kits add downforce: more grip at speed.</span>'));
     } else if (this.cuTab === 'stance') {
       chips('SUSPENSION', O.suspension, 'suspension');
       chips('WINDOW TINT', O.tints, 'tint', true, true);
@@ -365,6 +432,7 @@ export class UI {
   _resetCustom() {
     const g = this.game;
     const id = this.garageSel || g.save.selectedCar;
+    this.cuPreview = null;
     g.audio.click();
     g.setCustom(id, { ...CAR_BY_ID[id].defaults }, true);
     this.renderCustom();
@@ -384,7 +452,7 @@ export class UI {
         `${st.done ? '<div class="ch-badge">✓ COMPLETE</div>' : ''}
          <div class="ch-t">${c.title}</div>
          <div class="ch-d">${c.desc}</div>
-         <div class="ch-meta"><span>GOAL <b>${GOAL_LABEL[c.goal.type](c.goal.value)}</b></span><span>REWARD <b>${formatInt(c.reward)}</b></span><span>${env.short} · ${c.weather.toUpperCase()}</span></div>
+         <div class="ch-meta"><span>GOAL <b>${GOAL_LABEL[c.goal.type](c.goal.value)}</b></span><span>PRIZE <b>${money(c.reward)}</b></span><span>${env.short} · ${c.weather.toUpperCase()}</span></div>
          ${st.best ? `<div class="ch-meta"><span>BEST <b>${formatInt(st.best)}</b></span></div>` : ''}`);
       const b = h('button', 'btn primary small', st.done ? 'PLAY AGAIN' : 'START');
       b.onclick = () => { g.audio.click(); g.startChallenge(c.id); };
@@ -573,9 +641,9 @@ export class UI {
     row(au, 'Background music (M)', toggle('musicOn'));
     const ga = group('GAME');
     row(ga, 'Show HUD (H)', toggle('showHud'));
-    row(ga, 'Sandbox: unlock all cars', toggle('unlockAll'));
+    row(ga, 'Sandbox: all cars and parts free', toggle('unlockAll'));
     const rb = h('button', 'btn ghost small', 'RESET');
-    rb.onclick = () => this.confirm('RESET PROGRESS?', 'Career points, best scores, unlocks, challenges and customisations will be erased.', () => { g.resetProgress(); this.renderSettings(); this.toast('Progress reset'); });
+    rb.onclick = () => this.confirm('RESET PROGRESS?', 'Cash, cars, parts, best scores, challenges and customisations will be erased. You restart with $5,000 and the two starter cars.', () => { g.resetProgress(); this.renderSettings(); this.toast('Progress reset'); });
     row(ga, 'Reset all progress', rb);
     const ct = group('CONTROLS');
     const keys = [

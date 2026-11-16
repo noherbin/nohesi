@@ -387,13 +387,13 @@ export const CAR_BY_ID = Object.fromEntries(PLAYER_CARS.map((c) => [c.id, c]));
 export const CUSTOM_OPTIONS = {
   colors: ['#f2f2f0', '#c9cfd4', '#7d848b', '#2b2f33', '#0c0d0f', '#b3121c', '#e05a12', '#f2c230', '#7cc42d', '#0f7a4a', '#1d4fbf', '#38b6e0', '#5b2d8f', '#e04f9a', '#8a6a3c', '#c9a34a'],
   finishes: [['gloss', 'Gloss'], ['metallic', 'Metallic'], ['pearl', 'Pearl'], ['matte', 'Matte'], ['chrome', 'Chrome']],
-  wheels: [['five', '5-Spoke'], ['split', 'Split Spoke'], ['mesh', 'Mesh'], ['multi', 'Multi-Spoke'], ['deep', 'Deep Dish'], ['turbine', 'Turbine'], ['yspoke', 'Y-Spoke'], ['center', 'Centre-Lock'], ['rs8', 'Classic 8-Spoke'], ['six', '6-Spoke'], ['vspoke', 'V-Spoke'], ['aero', 'Aero Disc'], ['gt', 'GT 20-Spoke'], ['blade', 'Blade']],
+  wheels: [['five', '5-Spoke'], ['split', 'Split Spoke'], ['mesh', 'Mesh'], ['multi', 'Multi-Spoke'], ['deep', 'Deep Dish'], ['turbine', 'Turbine'], ['yspoke', 'Y-Spoke'], ['center', 'Centre-Lock'], ['rs8', 'Classic 8-Spoke'], ['six', '6-Spoke'], ['vspoke', 'V-Spoke'], ['aero', 'Aero Disc'], ['gt', 'GT 20-Spoke'], ['blade', 'Blade'], ['dish3', '3-Piece Deep Mesh'], ['dish5', 'Deep Dish 5-Star'], ['sdish', 'Super Deep 12'], ['steelie', 'Banded Steelie'], ['fan', 'Turbofan']],
   rimColors: ['#c9ccd0', '#5c6066', '#1a1a1c', '#c9a34a', '#8a5a2c', '#f2f2f0'],
   calipers: ['#c8102e', '#e8c21c', '#1f4ea3', '#1a1a1c', '#c9a34a', '#7cc42d'],
   tints: [['0', 'Light'], ['1', 'Medium'], ['2', 'Dark'], ['3', 'Limo']],
   suspension: [['stock', 'Stock'], ['lowered', 'Lowered'], ['slammed', 'Slammed']],
   spoilers: [['none', 'None'], ['lip', 'Lip'], ['duck', 'Ducktail'], ['wing', 'Wing'], ['gt', 'GT Wing']],
-  kits: [['stock', 'Stock'], ['street', 'Street'], ['aggressive', 'Aggressive'], ['wide', 'Widebody']],
+  kits: [['stock', 'Stock'], ['street', 'Street'], ['aggressive', 'Aggressive'], ['wide', 'Widebody'], ['rivet', 'Tokyo Rivet'], ['outlaw', 'Outlaw Works']],
   exhausts: [['stock', 'Stock'], ['sport', 'Sport'], ['straight', 'Straight Pipe']],
 };
 

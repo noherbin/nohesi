@@ -102,6 +102,13 @@ function bump(t, c, w) {
   return Math.abs(u) >= 1 ? 0 : 0.5 + 0.5 * Math.cos(u * Math.PI);
 }
 
+// Bolt-on widebody kits: riveted over-fenders stand proud of the stock body (ext, m), the tracks widen so
+// the tyres fill them, and the tyres themselves get wider. band = radial width of the flare round the arch.
+export const FLARE_KITS = {
+  rivet: { ext: 0.065, band: 0.075, tyre: 1.14, leg: 0.075, shape: 'angular' },
+  outlaw: { ext: 0.09, band: 0.095, tyre: 1.2, leg: 0.1, shape: 'boxy' },
+};
+
 /** Geometric context for a body definition. */
 export function bodyContext(b, custom = {}, hi = true) {
   const L = b.L, W = b.W;
@@ -146,7 +153,9 @@ export function bodyContext(b, custom = {}, hi = true) {
   const tFA = b.fa; // front axle t
   const zf = -L / 2 + tFA * L, zr = zf + b.wb;
   const tRA = (zr + L / 2) / L;
-  const wr = b.wr, tw = b.tw ?? 0.25;
+  const fk = FLARE_KITS[custom.kit] || null;
+  const tw0 = b.tw ?? 0.25;
+  const wr = b.wr, tw = tw0 * (fk ? fk.tyre : 1);
   const lowerAmt = custom.suspension === 'slammed' ? 0.07 : custom.suspension === 'lowered' ? 0.035 : 0;
   const archR = wr + 0.03 + lowerAmt * 0.85;
   const z = (t) => -L / 2 + t * L;
@@ -192,7 +201,9 @@ export function bodyContext(b, custom = {}, hi = true) {
   ctx.trackAt = (zz) => (zz < (zf + zr) / 2 ? ctx.trackF : ctx.trackR);
   // exact half-width of the body side at (t, y unlowered), matching the loft (its yn mapping and the haunch
   // bulge over the wheels), so patches drawn on the flanks sit on the paint instead of sinking into it
-  const xcN = clamp((ctx.track / 2 - tw / 2 - 0.03) / (W / 2), 0.4, 0.86);
+  ctx.bodyTrack = ctx.track;
+  ctx.bodyTw = tw0;
+  const xcN = clamp((ctx.track / 2 - tw0 / 2 - 0.03) / (W / 2), 0.4, 0.86);
   ctx.flankX = (t, y) => {
     const bt = bot(t), tp = top(t);
     const yn = (y - bt) / Math.max(1e-3, tp - bt);
@@ -216,6 +227,51 @@ export function bodyContext(b, custom = {}, hi = true) {
     if (yn < 0 || yn > 1) return 0;
     return hw(t) * templateX(tpl, yn);
   };
+  if (fk) {
+    // over-fenders: work out where each one can sit on this body, then push the tyres out to fill them
+    ctx.flare = { ...fk, axles: {} };
+    for (const za of [zf, zr]) {
+      const R = archR + 0.012;
+      const yc = wr - lower; // arch centre (unlowered coordinates, as flankX takes)
+      // the arch itself (the flare's core); its ends are trimmed to the body below
+      const ts = [];
+      for (let k = 0; k <= 8; k++) { const t = (za - R + (k / 8) * 2 * R + L / 2) / L; if (t > 0.01 && t < 0.99) ts.push(t); }
+      let xMax = 0;
+      for (const t of ts) for (let y = yc - fk.leg; y <= yc + R; y += 0.02) xMax = Math.max(xMax, ctx.flankX(t, y));
+      // the flare must not climb onto the bonnet / deck: its top stays where the side is still near full width
+      let yLim = yc + R + fk.band;
+      for (const t of ts) {
+        let y = yc;
+        while (y < yc + R + fk.band && ctx.flankX(t, y + 0.01) > xMax - 0.05) y += 0.01;
+        yLim = Math.min(yLim, y);
+      }
+      const vTop = Math.max(R + 0.035, Math.min(R + fk.band * 0.95, yLim - yc - 0.012));
+      // inner face sits just inside the body everywhere the flare covers, so no seam opens up
+      let xIn = xMax;
+      for (const t of ts) for (let y = yc - fk.leg; y <= yc + vTop; y += 0.015) { const fx = ctx.flankX(t, y); if (fx > 0.05) xIn = Math.min(xIn, fx); }
+      xIn = Math.max(xIn - 0.02, xMax - 0.16);
+      const xOut = xMax + fk.ext;
+      // fore and aft the flare only reaches as far as the body is still wide enough to carry it (noses and
+      // tails curve in; a flare past that point would stand free as a block)
+      const reach = (dir) => {
+        let u = R + 0.02;
+        while (u < R + fk.band) {
+          const t = (za + dir * (u + 0.01) + L / 2) / L;
+          if (t <= 0.005 || t >= 0.995) break;
+          let ok = true;
+          for (let y = yc - fk.leg; y <= yc + vTop && ok; y += 0.02) if (ctx.flankX(t, y) < xIn + 0.012) ok = false;
+          if (!ok) break;
+          u += 0.01;
+        }
+        return u;
+      };
+      ctx.flare.axles[za] = { R, yc, vTop, xIn, xOut, uF: reach(-1), uR: reach(1) };
+    }
+    const tr = (za) => 2 * (ctx.flare.axles[za].xOut - 0.01 - tw / 2);
+    ctx.trackF = tr(zf);
+    ctx.trackR = tr(zr);
+    ctx.track = Math.min(ctx.trackF, ctx.trackR);
+  }
   return ctx;
 }
 
@@ -258,7 +314,7 @@ function loftBody(ctx, trimH = 0.06, hi = true) {
   const tpl = ctx.tpl;
   const s = ctx.sect.s;
   // Inner wheel-well wall position (normalised half width)
-  const xc = clamp((ctx.track / 2 - ctx.tw / 2 - 0.03) / (ctx.W / 2), 0.4, 0.86);
+  const xc = clamp(((ctx.bodyTrack ?? ctx.track) / 2 - (ctx.bodyTw ?? ctx.tw) / 2 - 0.03) / (ctx.W / 2), 0.4, 0.86);
   const half = [[0, 0], [xc * 0.5, 0], [xc - 0.004, 0], [xc + 0.012, 0.002]];
   for (const p of tpl) if (p[1] > 0.002 && p[0] > xc + 0.03) half.push([p[0], p[1]]);
   half.push([0, 1]);
@@ -426,6 +482,15 @@ function loftCabin(ctx, hi = true) {
 }
 
 /* ------------------------------------------------------------ wheels */
+// depth: how far the centre sits behind the lip (m); lip: flat lip width as a share of the rim radius
+const DEEP_DISH = {
+  deep: { depth: 0.1, lip: 0.14 },
+  dish3: { depth: 0.115, lip: 0.17, bolts: 40 },
+  dish5: { depth: 0.12, lip: 0.15, step: true },
+  sdish: { depth: 0.14, lip: 0.22, step: true },
+  steelie: { depth: 0.07, lip: 0.1 },
+};
+
 export function wheelGeometries(r, w, style, hi = true) {
   const seg = hi ? 28 : 14;
   const rr = r * (hi ? 0.7 : 0.66);
@@ -441,14 +506,47 @@ export function wheelGeometries(r, w, style, hi = true) {
     new THREE.Vector2(rr * 0.94, -w / 2 + 0.03), new THREE.Vector2(rr * 0.9, -w / 2 + 0.02),
   ], seg).rotateZ(-Math.PI / 2);
   parts.push(barrel);
-  const lip = style === 'deep' ? 0.06 : style === 'rs8' ? 0.045 : 0.025;
-  parts.push(new THREE.CylinderGeometry(rr, rr, 0.02, seg, 1, true).rotateZ(Math.PI / 2).translate(w / 2 - 0.02, 0, 0));
-  parts.push(new THREE.RingGeometry(rr - lip, rr * 1.005, seg).rotateY(Math.PI / 2).translate(w / 2 - 0.012, 0, 0));
-  const face = w / 2 - (style === 'deep' ? 0.07 : style === 'rs8' ? 0.055 : 0.035);
+  // deep-dish wheels: the centre sits far back inside a polished barrel, behind a wide flat lip (a separate
+  // polished part, so the centre can be painted while the lip stays bright)
+  const D = hi ? DEEP_DISH[style] : null;
+  const lipParts = [];
+  let face, ri = rr;
+  if (D) {
+    ri = rr * (1 - D.lip);
+    face = Math.max(-w / 2 + 0.05, w / 2 - D.depth);
+    const x0 = w / 2 - 0.01;
+    lipParts.push(new THREE.RingGeometry(ri, rr * 1.005, seg * 2).rotateY(Math.PI / 2).translate(x0, 0, 0));
+    lipParts.push(new THREE.TorusGeometry(rr * 1.0, 0.007, 6, seg * 2).rotateY(Math.PI / 2).translate(x0 - 0.004, 0, 0));
+    if (D.step) {
+      // stepped lip: the barrel drops in a second ring part-way down
+      const xs = x0 - (x0 - face) * 0.42, r2 = ri * 0.93;
+      lipParts.push(new THREE.CylinderGeometry(ri, ri, x0 - xs, seg * 2, 1, true).rotateZ(Math.PI / 2).translate((x0 + xs) / 2, 0, 0));
+      lipParts.push(new THREE.RingGeometry(r2, ri, seg * 2).rotateY(Math.PI / 2).translate(xs, 0, 0));
+      lipParts.push(new THREE.CylinderGeometry(r2, r2 * 0.98, xs - face, seg * 2, 1, true).rotateZ(Math.PI / 2).translate((xs + face) / 2, 0, 0));
+      ri = r2 * 0.98;
+    } else {
+      lipParts.push(new THREE.CylinderGeometry(ri, ri * 0.97, x0 - face, seg * 2, 1, true).rotateZ(Math.PI / 2).translate((x0 + face) / 2, 0, 0));
+      ri *= 0.97;
+    }
+    if (D.bolts) {
+      // three-piece: the centre bolts to the barrel round a flange, a ring of small polished bolt heads
+      parts.push(new THREE.RingGeometry(ri * 0.86, ri, seg * 2).rotateY(Math.PI / 2).translate(face + 0.006, 0, 0));
+      for (let i = 0; i < D.bolts; i++) {
+        const a = (i / D.bolts) * Math.PI * 2;
+        lipParts.push(new THREE.CylinderGeometry(0.0052, 0.0052, 0.008, 6).rotateZ(Math.PI / 2).translate(face + 0.01, Math.cos(a) * ri * 0.93, Math.sin(a) * ri * 0.93));
+      }
+    }
+  } else {
+    const lip = style === 'rs8' ? 0.045 : 0.025;
+    parts.push(new THREE.CylinderGeometry(rr, rr, 0.02, seg, 1, true).rotateZ(Math.PI / 2).translate(w / 2 - 0.02, 0, 0));
+    parts.push(new THREE.RingGeometry(rr - lip, rr * 1.005, seg).rotateY(Math.PI / 2).translate(w / 2 - 0.012, 0, 0));
+    face = w / 2 - (style === 'rs8' ? 0.055 : 0.035);
+  }
+  const spokeR = D ? ri * 0.98 : rr * 0.97;
   const hub = rr * 0.24;
   parts.push(new THREE.CylinderGeometry(hub, hub * 1.1, 0.06, 12).rotateZ(Math.PI / 2).translate(face, 0, 0));
   // spokes taper toward the rim and are dished: the outer ends sit further out toward the lip
-  const dish = style === 'deep' || style === 'rs8' ? 0.0 : style === 'aero' ? 0.012 : 0.028;
+  const dish = D || style === 'rs8' ? 0.0 : style === 'aero' ? 0.012 : 0.028;
   const spoke = (ang, width, depth, len0, len1, twist = 0, taper = 0.72) => {
     const g = new THREE.BoxGeometry(depth, len1 - len0, width, 1, 3, 1);
     g.translate(0, (len0 + len1) / 2, 0);
@@ -475,7 +573,34 @@ export function wheelGeometries(r, w, style, hi = true) {
   } else if (style === 'multi') {
     for (let i = 0; i < 10; i++) parts.push(spoke((i / 10) * Math.PI * 2, 0.035, 0.04, hub * 0.8, rr * 0.97));
   } else if (style === 'deep') {
-    for (let i = 0; i < 6; i++) parts.push(spoke((i / 6) * Math.PI * 2, 0.07, 0.04, hub * 0.8, rr * 0.9));
+    // classic deep dish: six broad spokes
+    for (let i = 0; i < 6; i++) parts.push(spoke((i / 6) * Math.PI * 2, 0.07, 0.04, hub * 0.8, spokeR, 0, 0.82));
+  } else if (style === 'dish3') {
+    // three-piece mesh: crossed fine spokes inside the deep lip
+    for (let i = 0; i < 12; i++) {
+      const a = (i / 12) * Math.PI * 2;
+      parts.push(spoke(a + 0.13, 0.016, 0.026, hub * 0.8, spokeR * 0.9));
+      parts.push(spoke(a - 0.13, 0.016, 0.026, hub * 0.8, spokeR * 0.9));
+    }
+  } else if (style === 'dish5') {
+    // deep five-star: five wide, flat spokes
+    for (let i = 0; i < 5; i++) parts.push(spoke((i / 5) * Math.PI * 2, 0.085, 0.036, hub * 0.8, spokeR, 0, 0.7));
+  } else if (style === 'sdish') {
+    // super-deep twelve-spoke
+    for (let i = 0; i < 12; i++) parts.push(spoke((i / 12) * Math.PI * 2, 0.024, 0.032, hub * 0.85, spokeR, 0, 0.8));
+  } else if (style === 'steelie') {
+    // banded steel wheel: a pressed disc with round vents and a polished cap, behind a chrome beauty ring
+    parts.push(new THREE.CylinderGeometry(spokeR, spokeR, 0.012, seg * 2).rotateZ(Math.PI / 2).translate(face, 0, 0));
+    for (let i = 0; i < 8; i++) {
+      const a = (i / 8) * Math.PI * 2;
+      parts.push(new THREE.TorusGeometry(spokeR * 0.16, 0.006, 6, 14).rotateY(Math.PI / 2).translate(face + 0.008, Math.cos(a) * spokeR * 0.62, Math.sin(a) * spokeR * 0.62));
+    }
+    parts.push(new THREE.CylinderGeometry(hub * 1.25, hub * 1.4, 0.03, 20).rotateZ(Math.PI / 2).translate(face + 0.012, 0, 0));
+    lipParts.push(new THREE.SphereGeometry(hub * 1.15, 18, 8, 0, Math.PI * 2, 0, Math.PI / 2).scale(0.45, 1, 1).rotateZ(-Math.PI / 2).translate(face + 0.026, 0, 0));
+  } else if (style === 'fan') {
+    // turbofan: a closed face with sixteen angled vanes, like 80s touring cars
+    parts.push(new THREE.CylinderGeometry(rr * 0.9, rr * 0.9, 0.012, seg * 2).rotateZ(Math.PI / 2).translate(face - 0.004, 0, 0));
+    for (let i = 0; i < 16; i++) parts.push(spoke((i / 16) * Math.PI * 2, 0.04, 0.022, hub * 1.2, rr * 0.9, 0.55, 0.9));
   } else if (style === 'turbine') {
     for (let i = 0; i < 14; i++) parts.push(spoke((i / 14) * Math.PI * 2, 0.05, 0.03, hub * 0.9, rr * 0.95, 0.5));
   } else if (style === 'yspoke') {
@@ -524,7 +649,7 @@ export function wheelGeometries(r, w, style, hi = true) {
     // five spoke
     for (let i = 0; i < 5; i++) parts.push(spoke((i / 5) * Math.PI * 2, 0.075, 0.045, hub * 0.8, rr * 0.97));
   }
-  if (hi && style !== 'center') {
+  if (hi && style !== 'center' && style !== 'steelie') {
     for (let i = 0; i < 5; i++) {
       const a = (i / 5) * Math.PI * 2 + 0.3;
       parts.push(new THREE.CylinderGeometry(0.0105, 0.0105, 0.024, 6).rotateZ(Math.PI / 2).translate(face + 0.03, Math.cos(a) * hub * 0.62, Math.sin(a) * hub * 0.62));
@@ -532,12 +657,14 @@ export function wheelGeometries(r, w, style, hi = true) {
     parts.push(new THREE.CylinderGeometry(hub * 0.42, hub * 0.46, 0.012, 16).rotateZ(Math.PI / 2).translate(face + 0.034, 0, 0));
   }
   const rim = merge(parts);
+  // a deep-set centre means a low-offset wheel: the brakes sit further inboard, behind the recessed face
+  const bx = Math.min(0, face - 0.052);
   // ventilated disc: two friction faces with a vane gap; caliper is a rounded block with a bridge
   const disc = merge([
     new THREE.CylinderGeometry(rr * 0.82, rr * 0.82, 0.01, 32).rotateZ(Math.PI / 2).translate(0.002, 0, 0),
     new THREE.CylinderGeometry(rr * 0.82, rr * 0.82, 0.01, 32).rotateZ(Math.PI / 2).translate(-0.022, 0, 0),
     new THREE.CylinderGeometry(rr * 0.78, rr * 0.78, 0.016, 32, 1, true).rotateZ(Math.PI / 2).translate(-0.01, 0, 0),
-  ]);
+  ]).translate(bx, 0, 0);
   const caliper = hi
     ? merge([
       // (the caliper sits 6 cm inboard of its mount; pads straddle the disc faces)
@@ -546,7 +673,8 @@ export function wheelGeometries(r, w, style, hi = true) {
       new RoundedBoxGeometry(0.082, rr * 0.14, 0.13, 2, 0.01).translate(0.05, rr * 0.83, 0),
     ])
     : new THREE.BoxGeometry(0.07, rr * 0.55, 0.16).translate(0.035, rr * 0.55, 0);
-  return { tire, rim, disc, caliper, rimR: rr };
+  caliper.translate(bx, 0, 0);
+  return { tire, rim, disc, caliper, rimR: rr, lip: lipParts.length ? merge(lipParts) : null };
 }
 
 /* ------------------------------------------------------------ details */
@@ -870,6 +998,129 @@ export function mirrorPose(ctx) {
  * Build all parts of a car as geometries keyed by material slot.
  * slots: paint, glass, trim, decal, chrome, head, tail, plate, interior, kit, body2, cabinTop
  */
+/**
+ * Bolt-on over-fenders for the widebody kits: a band round each wheel arch standing out from the stock body,
+ * angular (rivet kit) or boxy (outlaw kit), with exposed rivets, plus skirt extensions bridging the flares.
+ */
+function overFenders(S, ctx, hi) {
+  const F = ctx.flare, low = ctx.lower;
+  // outward-extent factor: full over the tyre, easing toward the body at the ends and along the top edge
+  const ss = (x) => { const q = clamp(x, 0, 1); return q * q * (3 - 2 * q); };
+  const taper = (A, R, e, za, y, zz) => {
+    const u = zz - za, v = y - (A.yc - low);
+    const uEnd = u < 0 ? A.uF : A.uR, au = Math.abs(u);
+    const fu = au <= R * 0.62 ? 1 : 1 - 0.68 * ss((au - R * 0.62) / Math.max(0.02, uEnd - R * 0.62));
+    const v0 = A.vTop - e * 0.75;
+    const fv = v <= v0 ? 1 : 1 - 0.5 * ss((v - v0) / (A.vTop + 0.01 - v0));
+    return fu * fv;
+  };
+  const outline = (R, e, vTop, uF, uR) => {
+    const Re = R + e;
+    const top = vTop;
+    const pts = F.shape === 'boxy'
+      ? [[-Re, -F.leg], [-Re, Re * 0.32], [-Re * 0.8, top * 0.9], [-Re * 0.58, top], [Re * 0.58, top], [Re * 0.8, top * 0.9], [Re, Re * 0.32], [Re, -F.leg]]
+      : [[-Re, -F.leg], [-Re, 0.0], [-Re * 0.9, top * 0.52], [-Re * 0.48, top], [Re * 0.48, top], [Re * 0.9, top * 0.52], [Re, 0.0], [Re, -F.leg]];
+    // trimmed fore and aft to where the body can carry the flare
+    return pts.map(([u, v]) => [Math.max(-uF, Math.min(uR, u)), v]);
+  };
+  const rivets = [];
+  for (const za of [ctx.zf, ctx.zr]) {
+    const A = F.axles[za];
+    const R = A.R, e = Math.max(0.04, Math.min(F.band, A.vTop - R + 0.02));
+    const depth = A.xOut - 0.01 - A.xIn;
+    for (const sx of [-1, 1]) {
+      // shape in (u, v) = (along the car, up from the arch centre); u is mirrored per side so the extrusion
+      // (shape z) always runs outward from the body
+      const sg = sx > 0 ? -1 : 1;
+      const sh = new THREE.Shape();
+      const out = outline(R, e, A.vTop, A.uF, A.uR);
+      sh.moveTo(sg * out[0][0], out[0][1]);
+      for (const [u, v] of out.slice(1)) sh.lineTo(sg * u, v);
+      sh.lineTo(sg * R, -F.leg);
+      sh.lineTo(sg * R, 0);
+      const n = hi ? 20 : 8;
+      for (let i = 1; i <= n; i++) { const a = (i / n) * Math.PI; sh.lineTo(sg * R * Math.cos(a), R * Math.sin(a)); }
+      sh.lineTo(-sg * R, -F.leg);
+      const g = new THREE.ExtrudeGeometry(sh, { depth, bevelEnabled: true, bevelThickness: 0.008, bevelSize: 0.007, bevelSegments: hi ? 2 : 1, curveSegments: 4 });
+      g.rotateY(sx > 0 ? Math.PI / 2 : -Math.PI / 2);
+      g.translate(sx * A.xIn, A.yc - low, za);
+      // taper: the flare blends into the body at its ends (into the bumper / sill) and rolls over at the top,
+      // instead of ending in flat slabs
+      const p = g.attributes.position;
+      // never higher than the body side it is bolted to (noses and tails drop away ahead of / behind the arch)
+      const yBodyCache = new Map();
+      const yBody = (zz) => {
+        const key = Math.round(zz * 200);
+        if (yBodyCache.has(key)) return yBodyCache.get(key);
+        const t = clamp((zz + ctx.L / 2) / ctx.L, 0, 1);
+        let y = A.yc;
+        while (y < A.yc + A.vTop + 0.03 && ctx.flankX(t, y + 0.005) >= A.xIn + 0.01) y += 0.005;
+        yBodyCache.set(key, y - low);
+        return y - low;
+      };
+      for (let i = 0; i < p.count; i++) {
+        const y0 = p.getY(i), zz = p.getZ(i);
+        const u = zz - za;
+        if (y0 - (A.yc - low) > 0.0) {
+          const yArch = A.yc - low + Math.sqrt(Math.max(0, R * R - u * u));
+          // keeps a real band over the tyre even where the body is lower than the arch (low-nosed supercars)
+          const lim = Math.max(yArch + Math.min(e * 0.7, 0.055), yBody(zz) - 0.004);
+          if (y0 > lim) p.setY(i, lim);
+        }
+      }
+      for (let i = 0; i < p.count; i++) {
+        const x = Math.abs(p.getX(i)), y = p.getY(i), zz = p.getZ(i);
+        const f = taper(A, R, e, za, y, zz);
+        if (f >= 0.999) continue;
+        const fl = ctx.flankX(clamp((zz + ctx.L / 2) / ctx.L, 0, 1), y + low) || A.xIn;
+        if (x <= fl) continue;
+        p.setX(i, sx * (fl + (x - fl) * f));
+      }
+      g.computeVertexNormals();
+      S.paint.push(g);
+      if (!hi) continue;
+      // rivets round the band, and down the legs, seated on the finished (tapered) outer face
+      const fm = new THREE.Mesh(g);
+      const rc = new THREE.Raycaster();
+      const rivet = (y, zz) => {
+        rc.set(new THREE.Vector3(sx * (A.xOut + 0.3), y, zz), new THREE.Vector3(-sx, 0, 0));
+        const hit = rc.intersectObject(fm)[0];
+        if (!hit || hit.face.normal.x * sx < 0.6) return;
+        const n = hit.face.normal;
+        const rv = new THREE.CylinderGeometry(0.0068, 0.0078, 0.008, 8).rotateZ(-sx * Math.PI / 2);
+        rv.applyQuaternion(new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(sx, 0, 0), n.clone().normalize()));
+        rivets.push(rv.translate(hit.point.x + n.x * 0.002, hit.point.y + n.y * 0.002, hit.point.z + n.z * 0.002));
+      };
+      const rm = R + e * 0.5;
+      const k = F.shape === 'boxy' ? 11 : 9;
+      // rivets sit mid-band; where a trimmed end leaves the band narrow, they move in with it
+      const uAt = (u) => Math.max(-(R + (A.uF - R) * 0.5), Math.min(R + (A.uR - R) * 0.5, u));
+      for (let i = 0; i < k; i++) {
+        const a = 0.12 + (i / (k - 1)) * (Math.PI - 0.24);
+        const vy = Math.min(rm * Math.sin(a), A.vTop - e * 0.45);
+        rivet(A.yc - low + vy, za + uAt(rm * Math.cos(a)));
+      }
+      for (const su of [-1, 1]) rivet(A.yc - low - F.leg * 0.5, za + uAt(su * rm));
+    }
+  }
+  S.chrome.push(...rivets);
+  // skirt extensions from the front flare to the rear one, out to the flares' faces
+  const Af = F.axles[ctx.zf], Ar = F.axles[ctx.zr];
+  const z0 = ctx.zf + Af.R + F.band * 0.6, z1 = ctx.zr - Ar.R - F.band * 0.6;
+  if (z1 > z0 + 0.2) {
+    const tm = ((z0 + z1) / 2 + ctx.L / 2) / ctx.L;
+    const yS = ctx.bot(tm) + 0.045;
+    const xb = ctx.flankX(tm, yS + 0.02) || ctx.hw(tm) * 0.9;
+    const xo = Math.min(Af.xOut, Ar.xOut) - 0.012;
+    if (xo > xb) {
+      for (const sx of [-1, 1]) {
+        const w = xo - xb + 0.04;
+        S.kit.push(new RoundedBoxGeometry(w, 0.075, z1 - z0, 2, 0.012).translate(sx * (xb - 0.04 + w / 2), yS - low, (z0 + z1) / 2));
+      }
+    }
+  }
+}
+
 export function carParts(def, custom = {}, hi = true) {
   const b = def.body;
   const ctx = bodyContext(b, custom, hi);
@@ -1555,7 +1806,7 @@ export function carParts(def, custom = {}, hi = true) {
   const yb = b.bottom[2]?.[1] ?? 0.18;
   const yfb = yLip;
   if (kit !== 'stock') {
-    const agg = kit === 'aggressive' || kit === 'wide';
+    const agg = kit === 'aggressive' || kit === 'wide' || !!ctx.flare;
     // splitter hangs under the lowest edge of the front bumper and reaches just past its face
     let yLow = Infinity;
     for (let t = 0.0; t <= 0.09; t += 0.005) yLow = Math.min(yLow, ctx.bot(t));
@@ -1575,6 +1826,7 @@ export function carParts(def, custom = {}, hi = true) {
     if (agg) {
       both((sx) => S.kit.push(placeBox(ctx, true, sx * (W / 2 - 0.13), yfb + 0.11, 0.16, 0.012, 0.12, 0.035, sx * 0.25)));
     }
+    if (ctx.flare) overFenders(S, ctx, hi);
     if (kit === 'wide') {
       for (const za of [ctx.zf, ctx.zr]) {
         both((sx) => {
@@ -1592,7 +1844,10 @@ export function carParts(def, custom = {}, hi = true) {
     scoopGeo(S, ctx.z(tF), ctx.z(tR), bodyYAtX(ctx, tF, 0) - low, bodyYAtX(ctx, tR, 0) - low, 0.44, 0.065);
   }
   // ---- Spoilers
-  const sp = custom.spoiler ?? b.spoiler ?? 'none';
+  let sp = custom.spoiler ?? b.spoiler ?? 'none';
+  // the widebody kits come with their signature rear aero unless another spoiler is fitted
+  if (sp === 'none' && kit === 'rivet') sp = 'duck';
+  if (sp === 'none' && kit === 'outlaw') sp = 'gt';
   const tDeck = b.deckT ?? 0.94;
   const deckY0 = ctx.top(tDeck) - low - ctx.dip(tDeck, 0);
   const deckZ0 = ctx.z(tDeck);
@@ -1947,6 +2202,8 @@ export function buildPlayerCar(def, custom, plateText = 'NO HESI') {
     kit: new THREE.MeshStandardMaterial({ color: custom.kitColor === 'body' ? custom.color : 0x15161a, roughness: custom.kitColor === 'body' ? 0.3 : 0.45, metalness: 0.25 }),
     body2: new THREE.MeshStandardMaterial({ color: 0xdedede, roughness: 0.6 }),
     rim: new THREE.MeshStandardMaterial({ color: custom.rimColor ?? 0xc9ccd0, metalness: 0.85, roughness: 0.28 }),
+    // polished deep-dish lips and barrels (seen from both sides inside the dish)
+    lip: new THREE.MeshStandardMaterial({ color: 0xf4f6f8, metalness: 1, roughness: 0.2, envMapIntensity: 1.8, side: THREE.DoubleSide }),
     tire: new THREE.MeshStandardMaterial({ map: tireTexture(), color: 0xb8b8b8, roughness: 0.9 }),
     disc: new THREE.MeshStandardMaterial({ map: brakeDiscTexture(), color: 0xc8ccd2, metalness: 0.85, roughness: 0.45 }),
     caliper: new THREE.MeshStandardMaterial({ color: custom.caliper ?? 0xc8102e, roughness: 0.35, metalness: 0.2 }),
@@ -1994,6 +2251,7 @@ export function buildPlayerCar(def, custom, plateText = 'NO HESI') {
       tire.castShadow = true;
       rim.castShadow = true;
       spin.add(tire, rim);
+      if (wg.lip) spin.add(new THREE.Mesh(wg.lip, mats.lip));
       const disc = new THREE.Mesh(wg.disc, mats.disc);
       spin.add(disc);
       const cal = new THREE.Mesh(wg.caliper, mats.caliper);

@@ -29,7 +29,11 @@ export const DEFAULT_SETTINGS = {
 export function defaultSave() {
   return {
     v: 1,
-    career: 0,
+    career: 0, // lifetime earnings
+    econ: 1,
+    cash: 5000,
+    owned: [],
+    parts: {},
     best: { endless: 0, timeattack: 0 },
     selectedCar: 'kaze',
     customs: {},
@@ -57,6 +61,11 @@ export function loadSave() {
         last: { ...base.last, ...(d.last || {}) },
         customs: d.customs || {},
         challenges: d.challenges || {},
+        // saves from before money existed are migrated by the economy (cars and fitted parts are kept)
+        econ: d.econ ?? 0,
+        cash: d.cash ?? 0,
+        owned: d.owned || [],
+        parts: d.parts || {},
       };
     }
   } catch (e) { /* storage unavailable */ }

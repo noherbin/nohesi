@@ -21,6 +21,7 @@ import { Autopilot } from './gameplay/autopilot.js';
 import { GarageScene } from './garage/garageScene.js';
 import { UI, MODES } from './ui/ui.js';
 import { Leaderboard } from './gameplay/leaderboard.js';
+import { Economy, money } from './gameplay/economy.js';
 import { HUD } from './ui/hud.js';
 import { PLAYER_CARS, CAR_BY_ID } from './config/cars.js';
 import { ENVIRONMENTS, TIMES, DENSITIES } from './config/environments.js';
@@ -55,6 +56,7 @@ export class Game {
 
   async init() {
     this.save = loadSave();
+    this.econ = new Economy(this);
     this.leaderboard = new Leaderboard(this);
     this.input = new Input();
     this.audio = new AudioSystem();
@@ -195,7 +197,7 @@ export class Game {
 
   /* ================================================================ cars */
   isUnlocked(id) {
-    return this.S.unlockAll || CAR_BY_ID[id].cost <= this.save.career;
+    return this.econ.ownsCar(id);
   }
 
   getCustom(id) {
@@ -207,7 +209,7 @@ export class Game {
     this.save.customs[id] = cu;
     this.saveNow();
     if (this.garage.def?.id === id) {
-      if (rebuild) this.garage.show(CAR_BY_ID[id], cu, this.S.plate);
+      if (rebuild) { this.garage.show(CAR_BY_ID[id], cu, this.S.plate); this._garageCustomKey = JSON.stringify(cu) + this.S.plate; }
       else {
         this.garage.car.mats.paint.color.set(cu.color);
       }
@@ -216,10 +218,14 @@ export class Game {
     if (id === this.save.selectedCar && rebuild) this.audioDirty = true;
   }
 
-  showGarageCar(id) {
-    if (this.garage.def?.id !== id || this._garageCustomKey !== JSON.stringify(this.getCustom(id)) + this.S.plate) {
-      this.garage.show(CAR_BY_ID[id], this.getCustom(id), this.S.plate);
-      this._garageCustomKey = JSON.stringify(this.getCustom(id)) + this.S.plate;
+  showGarageCar(id) { this.previewCustom(id, this.getCustom(id)); }
+
+  /** Show a car in the garage with a given set of parts (a try-before-you-buy preview when not yet saved). */
+  previewCustom(id, cu) {
+    const key = JSON.stringify(cu) + this.S.plate;
+    if (this.garage.def?.id !== id || this._garageCustomKey !== key) {
+      this.garage.show(CAR_BY_ID[id], cu, this.S.plate);
+      this._garageCustomKey = key;
     }
   }
 
@@ -413,14 +419,15 @@ export class Game {
 
   restart() {
     this.audio.click();
-    if (this.session?.mode === 'endless') this._bankRun(false);
+    if (this.session?.mode === 'endless') this._paidToast(this._bankRun(false).pay);
     this.startSession(this.sessionCfg, false);
   }
 
   exitToMenu(screen) {
     this.audio.click();
-    if (this.session?.mode === 'endless' && this.state !== 'results') this._bankRun(false);
-    if (this.session?.mode === 'timeattack' && this.state !== 'results') this._bankScore(this.scoring.score);
+    if (this.session?.mode === 'endless' && this.state !== 'results') this._paidToast(this._bankRun(false).pay);
+    // an abandoned Time Attack still pays for what was driven
+    if (this.session?.mode === 'timeattack' && this.state !== 'results') this._paidToast(this.econ.earn(this.econ.payFor(this.scoring.summary())));
     this.hud.show(false);
     this.state = 'menu';
     this.startSession(this._attractCfg(), true);
@@ -468,19 +475,8 @@ export class Game {
   }
 
   /* ================================================================ progression */
-  _bankScore(score) {
-    const before = this.save.career;
-    this.save.career += Math.floor(score);
-    this._checkUnlocks(before, this.save.career);
-  }
-
-  _checkUnlocks(before, after) {
-    for (const c of PLAYER_CARS) {
-      if (c.cost > before && c.cost <= after) {
-        this.ui.toast(`NEW CAR UNLOCKED · ${c.name.toUpperCase()}`, 'gold');
-        this.audio.bigChime();
-      }
-    }
+  _paidToast(pay) {
+    if (pay > 0) { this.ui.toast(`+${money(pay)} EARNED`, 'good'); this.saveNow(); }
   }
 
   /** Put a finished run on the leaderboards and tell the player where it placed. */
@@ -515,10 +511,10 @@ export class Game {
     if (crashed) st.crashes++;
     const newBest = sum.score > this.save.best.endless;
     if (newBest) this.save.best.endless = sum.score;
-    this._bankScore(sum.score);
+    const pay = this.econ.earn(this.econ.payFor(sum));
     this._recordRun('endless', sum);
     this.saveNow();
-    return { sum, newBest };
+    return { sum, newBest, pay };
   }
 
   /* ================================================================ loop */
@@ -742,8 +738,8 @@ export class Game {
     }
     this.crashCD = 1.5;
     if (sess.mode === 'endless') {
-      const { sum, newBest } = this._bankRun(true);
-      this.hud.banner(newBest && sum.score > 0 ? 'NEW BEST' : 'CRASHED · RUN OVER', formatInt(sum.score), `${sum.nearMisses} near misses · ${this.fmtDist(sum.distance)} · top ${Math.round(this.S.units === 'kmh' ? sum.topSpeed * 1.609 : sum.topSpeed)} ${this.S.units === 'kmh' ? 'km/h' : 'mph'}`, 3.8);
+      const { sum, newBest, pay } = this._bankRun(true);
+      this.hud.banner(newBest && sum.score > 0 ? 'NEW BEST' : 'CRASHED · RUN OVER', formatInt(sum.score), `+${money(pay)} earned · ${sum.nearMisses} near misses · ${this.fmtDist(sum.distance)} · top ${Math.round(this.S.units === 'kmh' ? sum.topSpeed * 1.609 : sum.topSpeed)} ${this.S.units === 'kmh' ? 'km/h' : 'mph'}`, 3.8);
       this.scoring.reset();
       this.hud.setup && this._setupHud();
       this.audio.fail();
@@ -823,15 +819,15 @@ export class Game {
         const best = this.save.best.timeattack;
         const newBest = sum.distance > best;
         if (newBest) this.save.best.timeattack = Math.floor(sum.distance);
-        this._bankScore(sum.score);
+        const pay = this.econ.earn(this.econ.payFor(sum));
         this._recordRun('timeattack', sum);
         this.saveNow();
         this._showResults({
           kicker: newBest ? 'NEW PERSONAL BEST' : 'TIME ATTACK',
           title: 'TIME UP',
           big: this.fmtDist(sum.distance),
-          stats: [['SCORE', formatInt(sum.score)], ['BEST', this.fmtDist(Math.max(best, sum.distance))], ['TOP SPEED', this.fmtSpeed(sum.topSpeed / MS_TO_MPH)], ['NEAR MISSES', sum.nearMisses]],
-          note: `+${formatInt(sum.score)} career points`,
+          stats: [['SCORE', formatInt(sum.score)], ['EARNED', money(pay)], ['BEST', this.fmtDist(Math.max(best, sum.distance))], ['TOP SPEED', this.fmtSpeed(sum.topSpeed / MS_TO_MPH)], ['NEAR MISSES', sum.nearMisses]],
+          note: `+${money(pay)} earned · you have ${money(this.econ.cash)}`,
         });
       }
     } else if (sess.mode === 'challenge') {
@@ -866,8 +862,8 @@ export class Game {
       const first = !rec.done;
       rec.done = true;
       const reward = first ? c.reward : Math.round(c.reward * 0.1);
-      this._bankScore(reward);
-      note = `+${formatInt(reward)} career points${first ? '' : ' (replay bonus)'}`;
+      this.econ.earn(reward);
+      note = `+${money(reward)} prize money${first ? '' : ' (replay bonus)'} · you have ${money(this.econ.cash)}`;
       this.audio.bigChime();
     } else {
       this.audio.fail();

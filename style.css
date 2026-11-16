@@ -244,7 +244,7 @@ input[type=range]::-moz-range-thumb { width: 12px; height: 12px; border-radius: 
 .cam-label.show { opacity: 1; }
 .h-hint { position: absolute; left: 28px; bottom: 24px; font-family: var(--font); font-size: 13px; color: rgba(255,255,255,0.75); line-height: 1.9; text-shadow: 0 1px 4px rgba(0,0,0,0.8); transition: opacity 1s; max-width: 520px; }
 .h-hint.fade { opacity: 0; }
-.toasts { position: absolute; right: 26px; top: 70px; display: flex; flex-direction: column; gap: 8px; align-items: flex-end; }
+.toasts { position: absolute; right: 26px; top: 112px; display: flex; flex-direction: column; gap: 8px; align-items: flex-end; }
 .toast { background: var(--panel2); border: 1px solid var(--line2); border-left: 3px solid var(--accent); padding: 10px 16px; font-family: var(--cond); font-size: 16px; letter-spacing: 1px; animation: toast 4.2s ease forwards; max-width: 360px; }
 .toast.good { border-left-color: var(--good); }
 .toast.gold { border-left-color: var(--gold); }
@@ -305,3 +305,21 @@ input[type=range]::-moz-range-thumb { width: 12px; height: 12px; border-radius: 
   .lb-table th.c-det, .lb-table td.c-det, .lb-table th.c-date, .lb-table td.c-date { display: none; }
   .lb-name { margin-left: 0; }
 }
+
+/* ---------------------------------------------------------------- money & shop */
+.head-cash { margin-left: auto; font-family: var(--cond); font-size: 26px; font-weight: 800; color: #6fdc8c; letter-spacing: 0.5px; font-variant-numeric: tabular-nums; }
+.menu-stats b.cash { color: #6fdc8c; }
+.car-item .tag.buy { color: #6fdc8c; }
+.car-item .tag.price { color: var(--mute); }
+.chip small { display: block; font-size: 11px; font-weight: 600; letter-spacing: 1px; color: var(--mute); margin-top: 2px; font-variant-numeric: tabular-nums; }
+.chip.forsale small { color: #6fdc8c; }
+.chip.sel small { color: #fff; }
+.chip.preview { border-color: var(--gold); border-style: dashed; background: rgba(242, 194, 48, 0.12); }
+.buybar { display: grid; grid-template-columns: 1fr; gap: 6px; align-items: center; padding: 12px 14px; margin: 4px 0 10px; border: 1px solid rgba(242, 194, 48, 0.55); background: rgba(242, 194, 48, 0.08); border-radius: 4px; }
+.buybar .bb-info { display: flex; align-items: baseline; gap: 12px; }
+.buybar .bb-info b { font-family: var(--cond); font-size: 20px; letter-spacing: 1px; }
+.buybar .bb-price { font-family: var(--cond); font-size: 22px; font-weight: 800; color: #6fdc8c; }
+.buybar .bb-note { color: var(--mute); font-size: 13px; }
+.buybar .bb-btns { display: flex; gap: 8px; margin-top: 4px; }
+.buybar button:disabled { opacity: 0.5; cursor: default; }
+.btn:disabled { opacity: 0.45; cursor: default; }
