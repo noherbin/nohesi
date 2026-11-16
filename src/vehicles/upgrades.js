@@ -53,27 +53,73 @@ export function effectivePhys(def, custom) {
   };
 }
 
-/* ---------------------------------------------------------------- ratings */
-export const PI_CLASSES = [
-  { id: 'D', max: 500, color: '#3fb5e8' }, { id: 'C', max: 600, color: '#f2c230' }, { id: 'B', max: 700, color: '#ff8a1e' },
-  { id: 'A', max: 800, color: '#ff3b55' }, { id: 'S1', max: 900, color: '#b05cff' }, { id: 'S2', max: 998, color: '#3f6bff' }, { id: 'X', max: 999, color: '#3bdc7a' },
+/* ---------------------------------------------------------------- classes
+ * NO HESI rates a build by PACE: one open-ended number, read like a speed, for how hard the car can run
+ * through traffic. It blends three axes, TOP END (top speed), PUNCH (0-60 and launch) and GRIP (cornering and
+ * braking), and has no ceiling, so a fully built hypercar keeps climbing.
+ * Classes are speed limits. A car runs in the lowest LIMIT its pace fits under (pace 113 -> LIMIT 120); past
+ * 200 there is NO LIMIT. Whichever axis stands out most for the car's level gives the build its STYLE.
+ */
+export const LIMITS = [
+  { id: '80', max: 80, name: 'LIMIT 80', color: '#7cc8ff' },
+  { id: '100', max: 100, name: 'LIMIT 100', color: '#42dcc0' },
+  { id: '120', max: 120, name: 'LIMIT 120', color: '#9be03a' },
+  { id: '140', max: 140, name: 'LIMIT 140', color: '#ffd23f' },
+  { id: '160', max: 160, name: 'LIMIT 160', color: '#ff9a2e' },
+  { id: '180', max: 180, name: 'LIMIT 180', color: '#ff4b5c' },
+  { id: '200', max: 200, name: 'LIMIT 200', color: '#d35cff' },
+  { id: 'NL', max: Infinity, name: 'NO LIMIT', color: '#f4f4f0', open: true },
 ];
-export const piClass = (pi) => PI_CLASSES.find((c) => pi <= c.max) || PI_CLASSES[PI_CLASSES.length - 1];
+export const limitOf = (pace) => LIMITS.find((c) => pace <= c.max);
+export const nextLimit = (cls) => LIMITS[LIMITS.indexOf(cls) + 1] || null;
+/** Where a pace sits inside its class, 0 at the class below's limit and 1 at this class's limit. */
+export function limitProgress(pace, cls) {
+  if (cls.open) return 1;
+  const i = LIMITS.indexOf(cls);
+  const lo = i > 0 ? LIMITS[i - 1].max : cls.max - 20;
+  return clamp((pace - lo) / (cls.max - lo), 0, 1);
+}
+
+export const STYLES = {
+  top: { id: 'top', name: 'MISSILE', desc: 'Strongest at the top end. Wants open lanes and long pulls.' },
+  punch: { id: 'punch', name: 'SPRINTER', desc: 'Strongest off the line. Shoots gaps and recovers from slowdowns.' },
+  grip: { id: 'grip', name: 'WEAVER', desc: 'Strongest in traffic. Turns in late and brakes later.' },
+  bal: { id: 'bal', name: 'BALANCED', desc: 'No axis stands out. Does a bit of everything.' },
+};
+// typical value and spread of each axis across the stock fleet, so styles are judged against other cars
+const AXIS_NORM = { top: [5.4, 1.9], punch: [6.4, 2.1], grip: [8.4, 1.6] };
+const STYLE_MARGIN = 0.45;
+function styleOf(axes) {
+  const z = {};
+  for (const k in AXIS_NORM) z[k] = (axes[k] - AXIS_NORM[k][0]) / AXIS_NORM[k][1];
+  const mean = (z.top + z.punch + z.grip) / 3;
+  let best = 'bal', bd = STYLE_MARGIN;
+  for (const k of ['grip', 'punch', 'top']) if (z[k] - mean > bd) { bd = z[k] - mean; best = k; }
+  return STYLES[best];
+}
 
 /**
- * Stats on a 0-10 scale (speed, acceleration, launch, handling, braking) plus raw figures and the performance
- * index. zeroSixty comes from running the physics; pass `sim` (a function (phys) -> seconds) to supply it.
+ * Stats on a 0-10 scale (speed, acceleration, launch, handling, braking) for the bars, plus raw figures, the
+ * three class axes, PACE, its LIMIT class and the build STYLE. zeroSixty comes from running the physics; pass
+ * `sim` (a function (phys) -> seconds) to supply it.
  */
 export function ratings(def, custom, sim) {
   const ep = effectivePhys(def, custom);
   const zeroSixty = sim ? sim(ep) : 5;
-  const speed = clamp((ep.topSpeed - 100) / 16, 0, 10);
-  const accel = clamp((7.5 - zeroSixty) / 0.55, 0, 10);
   const pw = ep.hp / ep.mass;
-  const launch = clamp(accel * 0.6 + (ep.drive === 'AWD' ? 2.2 : ep.drive === 'FWD' ? 0.6 : 1.2) + ep.launch * 6 + pw * 3, 0, 10);
-  const handling = clamp(ep.grip * 7.2 - (ep.mass - 1300) / 380 + ep.downforce * 1.3 + (ep.tireB - 14) * 0.22, 0, 10);
-  const braking = clamp(ep.brakeG * 6.6 - (ep.mass - 1400) / 520, 0, 10);
-  const score = speed * 0.22 + accel * 0.28 + launch * 0.08 + handling * 0.28 + braking * 0.14;
-  const pi = Math.round(clamp(100 + score * 92, 100, 999));
-  return { speed, accel, launch, handling, braking, pi, cls: piClass(pi), topSpeed: ep.topSpeed, zeroSixty, hp: ep.hp, mass: ep.mass };
+  // unclamped scores (about 0-10 for stock cars; upgrades can push past 10)
+  const rs = (ep.topSpeed - 100) / 16;
+  const ra = (7.5 - zeroSixty) / 0.55;
+  const rl = ra * 0.6 + (ep.drive === 'AWD' ? 2.2 : ep.drive === 'FWD' ? 0.6 : 1.2) + ep.launch * 6 + pw * 3;
+  const rh = ep.grip * 7.2 - (ep.mass - 1300) / 380 + ep.downforce * 1.3 + (ep.tireB - 14) * 0.22;
+  const rb = ep.brakeG * 6.6 - (ep.mass - 1400) / 520;
+  const axes = { top: rs, punch: ra * 0.75 + rl * 0.25, grip: rh * 0.6 + rb * 0.4 };
+  const pace = Math.max(1, Math.round(19.6 * (axes.top * 0.3 + axes.punch * 0.36 + axes.grip * 0.34) - 2.5));
+  const cls = limitOf(pace);
+  const c10 = (v) => clamp(v, 0, 10);
+  return {
+    speed: c10(rs), accel: c10(ra), launch: c10(rl), handling: c10(rh), braking: c10(rb),
+    axes, pace, cls, style: styleOf(axes),
+    topSpeed: ep.topSpeed, zeroSixty, hp: ep.hp, mass: ep.mass,
+  };
 }

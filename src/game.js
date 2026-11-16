@@ -262,7 +262,7 @@ export class Game {
     return t;
   }
 
-  /** Ratings (0-10 bars, PI class, raw figures) for a car with a given customisation. */
+  /** Ratings (0-10 bars, pace, LIMIT class, style, raw figures) for a car with a given customisation. */
   ratings(def, custom) {
     return ratings(def, custom || def.defaults, () => this.zeroSixty(def, custom));
   }
@@ -272,7 +272,7 @@ export class Game {
     const ep = effectivePhys(def, custom || this.save.customs[def.id] || def.defaults);
     const handling = clamp(ep.grip * 7.2 - (ep.mass - 1300) / 380 + ep.downforce * 1.3 + (ep.tireB - 14) * 0.22, 1, 10);
     const braking = clamp(ep.brakeG * 6.6 - (ep.mass - 1400) / 520, 1, 10);
-    return { topSpeed: ep.topSpeed, zeroSixty: r.zeroSixty, hp: Math.round(ep.hp), mass: Math.round(ep.mass), handling, braking, pi: r.pi, cls: r.cls };
+    return { topSpeed: ep.topSpeed, zeroSixty: r.zeroSixty, hp: Math.round(ep.hp), mass: Math.round(ep.mass), handling, braking, pace: r.pace, cls: r.cls, style: r.style };
   }
 
   get carDef() { return CAR_BY_ID[this.save.selectedCar] || PLAYER_CARS[0]; }

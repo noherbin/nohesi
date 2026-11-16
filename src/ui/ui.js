@@ -6,6 +6,7 @@ import { formatInt, M_TO_MI } from '../core/utils.js';
 import { BOARDS, cleanName } from '../gameplay/leaderboard.js';
 import { money } from '../gameplay/economy.js';
 import { Customizer } from './customizer.js';
+import { classBadge, limitSign } from './classBadge.js';
 
 const $ = (id) => document.getElementById(id);
 const h = (tag, cls, html) => {
@@ -201,7 +202,10 @@ export class UI {
     chips($('density-chips'), DENSITIES, 'density');
     const car = CAR_BY_ID[g.save.selectedCar];
     $('setup-car-name').textContent = car.name;
-    $('setup-car-cls').textContent = `${car.cls} · ${car.phys.hp} hp · ${car.phys.drive}`;
+    const rt = g.ratings(car, g.getCustom(car.id));
+    const sk = document.createElement('div');
+    sk.textContent = `${car.cls} · ${Math.round(rt.hp)} hp · ${car.phys.drive}`;
+    $('setup-car-cls').replaceChildren(classBadge(rt, { size: 'sm' }), sk);
   }
 
   _startFromSetup() {
@@ -221,7 +225,7 @@ export class UI {
       const cur = g.save.selectedCar === car.id;
       const afford = g.econ.canAfford(car.cost);
       const b = h('button', 'car-item' + (this.garageSel === car.id ? ' sel' : '') + (un ? '' : ' locked'),
-        `<div><div class="n">${car.name}</div><div class="k">${car.cls}</div></div><div class="tag ${cur ? 'cur' : un ? '' : afford ? 'buy' : 'price'}">${cur ? 'SELECTED' : un ? 'OWNED' : money(car.cost)}</div>`);
+        `${limitSign(g.ratings(car, g.getCustom(car.id)).cls)}<div class="ci-txt"><div class="n">${car.name}</div><div class="k">${car.cls}</div></div><div class="tag ${cur ? 'cur' : un ? '' : afford ? 'buy' : 'price'}">${cur ? 'SELECTED' : un ? 'OWNED' : money(car.cost)}</div>`);
       b.onclick = () => {
         g.audio.click();
         this.garageSel = car.id;
@@ -233,13 +237,11 @@ export class UI {
     g.showGarageCar(car.id);
     $('ci-maker').textContent = car.maker;
     $('ci-name').textContent = car.name;
-    const stPI = g.carStats(car);
-    $('ci-cls').innerHTML = '';
-    const pib = document.createElement('span');
-    pib.className = 'cz-pib ci-pi';
-    pib.style.setProperty('--pc', stPI.cls.color);
-    pib.innerHTML = `<b>${stPI.cls.id}</b><span>${stPI.pi}</span>`;
-    $('ci-cls').append(pib, document.createTextNode(` ${car.cls} · ${car.engine.label}`));
+    const rt = g.ratings(car, g.getCustom(car.id));
+    const ck = document.createElement('div');
+    ck.className = 'ci-k';
+    ck.textContent = `${car.cls} · ${car.engine.label}`;
+    $('ci-cls').replaceChildren(classBadge(rt, { size: 'md' }), ck);
     $('ci-blurb').textContent = car.blurb;
     const st = g.carStats(car);
     const units = g.save.settings.units;

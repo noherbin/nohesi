@@ -12,6 +12,7 @@ import {
 } from '../config/parts.js';
 import { money } from '../gameplay/economy.js';
 import { thumbFor, groupThumb, paintThumb } from './thumbs.js';
+import { classBadge, limitMeter } from './classBadge.js';
 
 const $ = (id) => document.getElementById(id);
 const el = (tag, cls, html) => {
@@ -484,10 +485,7 @@ export class Customizer {
     $('cz-maker').textContent = def.maker.toUpperCase();
     $('cz-cash').textContent = money(this.econ.cash);
     const r = this.game.ratings(def, this.saved);
-    const pi = $('cz-pi');
-    pi.innerHTML = '';
-    pi.style.setProperty('--pc', r.cls.color);
-    pi.append(txt('b', '', r.cls.id), txt('span', '', String(r.pi)));
+    $('cz-pi').replaceChildren(classBadge(r, { size: 'sm' }));
     this.renderTabs();
     this.renderList(anim);
     this.renderCard(anim);
@@ -697,10 +695,13 @@ export class Customizer {
     const a = this.game.ratings(def, this.saved), b = this.game.ratings(def, this.draft);
     const box = el('div', 'cz-stats');
     const head = el('div', 'cz-pirow');
-    const badge = (r) => { const x = el('div', 'cz-pib'); x.style.setProperty('--pc', r.cls.color); x.append(txt('b', '', r.cls.id), txt('span', '', String(r.pi))); return x; };
-    head.append(badge(a));
-    if (b.pi !== a.pi) { head.append(txt('i', 'cz-arrow', '→'), badge(b)); head.append(txt('span', 'cz-dpi ' + (b.pi > a.pi ? 'up' : 'dn'), `${b.pi > a.pi ? '+' : ''}${b.pi - a.pi}`)); }
-    box.append(head);
+    const changed = b.pace !== a.pace || b.style !== a.style;
+    head.append(classBadge(a, { size: 'sm' }));
+    if (changed) {
+      head.append(txt('i', 'cz-arrow', '→'), classBadge(b, { size: 'sm' }));
+      if (b.pace !== a.pace) head.append(txt('span', 'cz-dpi ' + (b.pace > a.pace ? 'up' : 'dn'), `${b.pace > a.pace ? '+' : ''}${b.pace - a.pace}`));
+    }
+    box.append(head, limitMeter(a, b));
     for (const [k, n] of STAT_ROWS) {
       const r = el('div', 'cz-stat');
       const va = a[k], vb = b[k];
