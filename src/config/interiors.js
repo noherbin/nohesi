@@ -177,6 +177,38 @@ export const INTERIORS = {
 };
 
 /** Interior for a car definition (falls back to the sedan design for anything unlisted). */
-export function interiorFor(def) {
-  return INTERIORS[def.id] || INTERIORS.kaze;
+// interior colour schemes (Customize > Interior): upholstery and door-insert colours
+export const INTERIOR_COLORS = {
+  black: { seat: '#151517', seatSide: '#151517', insert: '#1f1f23', doorInsert: '#1d1d21' },
+  redBlack: { seat: '#151517', seatSide: '#9e0f1d', insert: '#9e0f1d', doorInsert: '#8f0e1a' },
+  cognac: { seat: '#7a4423', seatSide: '#5e3219', insert: '#8a5029', doorInsert: '#7a4423' },
+  cream: { seat: '#d8ccb4', seatSide: '#c7b99d', insert: '#e2d7c1', doorInsert: '#d0c3a9', headliner: '#cfc8bb' },
+  blue: { seat: '#1c2742', seatSide: '#1c2742', insert: '#5a5f68', doorInsert: '#1f2a46' },
+  tan: { seat: '#a8773f', seatSide: '#151517', insert: '#b4844a', doorInsert: '#a8773f' },
+};
+
+/**
+ * The interior spec for a car, with the player's interior customisation applied (seats, material, colours,
+ * stitching, trim, steering wheel, gear knob, floor mats, ambient light). 'stock' keeps the car's own design.
+ */
+export function interiorFor(def, cu) {
+  const base = INTERIORS[def.id] || INTERIORS.kaze;
+  if (!cu) return base;
+  const I = { ...base, palette: { ...base.palette }, wheel: { ...base.wheel } };
+  const set = (v) => v !== undefined && v !== 'stock';
+  if (set(cu.seats)) I.seats = cu.seats;
+  if (set(cu.seatMat)) I.palette.insertTex = cu.seatMat;
+  if (set(cu.intColor) && INTERIOR_COLORS[cu.intColor]) Object.assign(I.palette, INTERIOR_COLORS[cu.intColor]);
+  if (cu.stitch) I.palette.stitch = cu.stitch;
+  if (set(cu.trim)) I.palette.trim = cu.trim;
+  if (set(cu.steering)) {
+    I.wheel.style = cu.steering;
+    if (cu.steering === 'race') Object.assign(I.wheel, { rim: 'alcantara', paddles: true, buttons: true, R: 0.165 });
+    if (cu.steering === 'momo3') Object.assign(I.wheel, { rim: 'leather', paddles: false });
+  }
+  if (set(cu.knob) && base.console === 'manual') I.knob = cu.knob;
+  if (set(cu.floorMats)) I.mats = cu.floorMats;
+  if (cu.ambient === 'off') I.palette.ambient = null;
+  else if (set(cu.ambient)) I.palette.ambient = cu.ambient;
+  return I;
 }

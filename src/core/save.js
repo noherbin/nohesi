@@ -30,7 +30,7 @@ export function defaultSave() {
   return {
     v: 1,
     career: 0, // lifetime earnings
-    econ: 1,
+    econ: 2,
     cash: 5000,
     owned: [],
     parts: {},

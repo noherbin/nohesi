@@ -104,7 +104,7 @@ export class Cockpit {
     this.mats = [];
     const D = car.dims, ctx = car.model.ctx, cab = def.body.cabin;
     this.def = def;
-    const I = interiorFor(def), P = I.palette;
+    const I = interiorFor(def, car.custom), P = I.palette;
     this.I = I;
     this.accent = P.accent;
     this.ambientColor = new THREE.Color(P.ambient || '#000000');
@@ -411,6 +411,11 @@ export class Cockpit {
     this.group = g;
     g.visible = this.visible;
     this.maxSpeed = Math.ceil((def.phys.topSpeed * 1.08) / 20) * 20;
+  }
+
+  /** Show or hide the driver's arms and gloves (hidden when the cabin is shown in the garage). */
+  setDriver(v) {
+    for (const h of this.hands || []) for (const o of [h.hand, h.fore, h.upper, h.elbow, h.band]) if (o) o.visible = v;
   }
 
   setVisible(v) {

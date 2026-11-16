@@ -4,7 +4,8 @@ import { ENVIRONMENTS, ENV_ORDER, TIMES, WEATHERS, DENSITIES } from '../config/e
 import { CHALLENGES, GOAL_LABEL } from '../config/challenges.js';
 import { formatInt, M_TO_MI } from '../core/utils.js';
 import { BOARDS, cleanName } from '../gameplay/leaderboard.js';
-import { money, PRICED } from '../gameplay/economy.js';
+import { money } from '../gameplay/economy.js';
+import { Customizer } from './customizer.js';
 
 const $ = (id) => document.getElementById(id);
 const h = (tag, cls, html) => {
@@ -27,9 +28,9 @@ export class UI {
     this.game = game;
     this.screen = 'loading';
     this.history = [];
-    this.cuTab = 'paint';
     this.garageSel = null;
     this._bind();
+    this.cz = new Customizer(this);
   }
 
   _bind() {
@@ -42,9 +43,6 @@ export class UI {
     $('btn-go').addEventListener('click', () => this._startFromSetup());
     $('btn-select').addEventListener('click', () => this._selectCar());
     $('btn-tocustom').addEventListener('click', () => { this.game.audio.click(); this.go('custom'); });
-    $('btn-cu-drive').addEventListener('click', () => { this.game.audio.click(); this.go('setup'); });
-    $('btn-cu-reset').addEventListener('click', () => this._resetCustom());
-    $('btn-cu-rev').addEventListener('click', () => this.game.revPreview());
     $('settings-back').addEventListener('click', () => {
       this.game.audio.click();
       this.go(this.settingsReturn || 'menu');
@@ -73,13 +71,11 @@ export class UI {
     window.addEventListener('pointermove', (e) => move(e.clientX, e.clientY));
     window.addEventListener('pointerup', () => (drag = null));
     cv.addEventListener('wheel', (e) => {
-      if (this.screen === 'garage' || this.screen === 'custom') {
-        this.game.garage.zoom = Math.max(0.7, Math.min(1.5, this.game.garage.zoom + e.deltaY * 0.0008));
-      }
+      if (this.screen === 'garage' || this.screen === 'custom') this.game.garage.wheelZoom(e.deltaY);
     }, { passive: true });
     for (const id of ['s-garage', 's-custom']) {
       $(id).addEventListener('wheel', (e) => {
-        if (e.target === $(id)) this.game.garage.zoom = Math.max(0.7, Math.min(1.5, this.game.garage.zoom + e.deltaY * 0.0008));
+        if (e.target === $(id)) this.game.garage.wheelZoom(e.deltaY);
       }, { passive: true });
     }
   }
@@ -92,12 +88,12 @@ export class UI {
       if (screen === 'custom') this.garageSel = this.garageSel && g.isUnlocked(this.garageSel) ? this.garageSel : g.save.selectedCar;
     }
     if (screen === 'settings' && this.screen !== 'pause' && this.screen !== 'settings') this.settingsReturn = 'menu';
-    if (screen !== 'custom') this.cuPreview = null; // leaving the shop drops an unbought preview
+    if (screen !== 'custom' && this.screen === 'custom') this.cz.close(); // leaving the shop drops an unbought preview
     this.show(screen);
     if (screen === 'menu') this.renderMenu();
     if (screen === 'setup') this.renderSetup();
     if (screen === 'garage') this.renderGarage();
-    if (screen === 'custom') this.renderCustom();
+    if (screen === 'custom') this.cz.open(this.garageSel || g.save.selectedCar);
     if (screen === 'challenges') this.renderChallenges();
     if (screen === 'leaderboard') this.renderLeaderboard();
     if (screen === 'settings') this.renderSettings();
@@ -237,7 +233,13 @@ export class UI {
     g.showGarageCar(car.id);
     $('ci-maker').textContent = car.maker;
     $('ci-name').textContent = car.name;
-    $('ci-cls').textContent = `${car.cls} · ${car.engine.label}`;
+    const stPI = g.carStats(car);
+    $('ci-cls').innerHTML = '';
+    const pib = document.createElement('span');
+    pib.className = 'cz-pib ci-pi';
+    pib.style.setProperty('--pc', stPI.cls.color);
+    pib.innerHTML = `<b>${stPI.cls.id}</b><span>${stPI.pi}</span>`;
+    $('ci-cls').append(pib, document.createTextNode(` ${car.cls} · ${car.engine.label}`));
     $('ci-blurb').textContent = car.blurb;
     const st = g.carStats(car);
     const units = g.save.settings.units;
@@ -291,151 +293,6 @@ export class UI {
     g.onCarChanged();
     this.renderGarage();
     this.toast(`${CAR_BY_ID[this.garageSel].name} selected`, 'good');
-  }
-
-  /* ------------------------------------------------------------ customise */
-  renderCustom() {
-    const g = this.game;
-    const id = this.garageSel || g.save.selectedCar;
-    const car = CAR_BY_ID[id];
-    const cu = g.getCustom(id);
-    // an unbought part being tried on: shown on the car, not saved until bought
-    const pv = this.cuPreview && this.cuPreview.id === id ? this.cuPreview : null;
-    const view = pv ? { ...cu, [pv.key]: pv.val } : cu;
-    $('cu-car').textContent = car.name.toUpperCase();
-    $('cu-cash').textContent = money(g.econ.cash);
-    if (pv) g.previewCustom(id, view);
-    else g.showGarageCar(id);
-    const tabs = [['paint', 'PAINT'], ['wheels', 'WHEELS'], ['body', 'AERO & KIT'], ['stance', 'STANCE & TINT'], ['exhaust', 'EXHAUST'], ['plate', 'PLATE']];
-    const te = $('cu-tabs');
-    te.innerHTML = '';
-    for (const [k, n] of tabs) {
-      const b = h('button', 'tab' + (this.cuTab === k ? ' sel' : ''), n);
-      b.onclick = () => { this.cuTab = k; this.cuPreview = null; g.audio.click(); this.renderCustom(); };
-      te.appendChild(b);
-    }
-    const body = $('cu-body');
-    body.innerHTML = '';
-    if (pv) {
-      const price = g.econ.price(pv.key, pv.val), afford = g.econ.canAfford(price);
-      const bar = h('div', 'buybar');
-      const info = h('div', 'bb-info');
-      const t = h('b');
-      t.textContent = pv.name.toUpperCase();
-      const pr = h('span', 'bb-price');
-      pr.textContent = money(price);
-      info.append(t, pr);
-      const note = h('div', 'bb-note');
-      note.textContent = afford ? `Trying it on · you have ${money(g.econ.cash)}` : `Trying it on · you need ${money(price - g.econ.cash)} more`;
-      const btns = h('div', 'bb-btns');
-      const buy = h('button', 'btn primary small', afford ? 'BUY &amp; FIT' : 'NOT ENOUGH CASH');
-      buy.disabled = !afford;
-      buy.onclick = () => {
-        if (!g.econ.buyPart(id, pv.key, pv.val)) return;
-        g.audio.bigChime();
-        this.toast(`PURCHASED · ${pv.name.toUpperCase()}`, 'gold');
-        this.cuPreview = null;
-        cu[pv.key] = pv.val;
-        g.setCustom(id, cu, true);
-        this.renderCustom();
-      };
-      const cancel = h('button', 'btn ghost small', 'CANCEL');
-      cancel.onclick = () => { g.audio.click(); this.cuPreview = null; this.renderCustom(); };
-      btns.append(buy, cancel);
-      bar.append(info, note, btns);
-      body.appendChild(bar);
-    }
-    const O = CUSTOM_OPTIONS;
-    const set = (k, v, rebuild = true) => {
-      cu[k] = v;
-      g.setCustom(id, cu, rebuild);
-      this.renderCustom();
-    };
-    const swatches = (title, list, key, rebuild = false) => {
-      body.appendChild(h('h3', '', title));
-      const w = h('div', 'swatches');
-      for (const c of list) {
-        const b = h('button', 'sw' + (cu[key]?.toLowerCase() === c.toLowerCase() ? ' sel' : ''));
-        b.style.background = c;
-        b.title = c;
-        b.setAttribute('aria-label', `${title} ${c}`);
-        b.onclick = () => { g.audio.click(); set(key, c, rebuild); };
-        w.appendChild(b);
-      }
-      body.appendChild(w);
-    };
-    const chips = (title, list, key, rebuild = true, numeric = false) => {
-      body.appendChild(h('h3', '', title));
-      const w = h('div', 'chips');
-      const priced = PRICED.includes(key);
-      for (const [v, n] of list) {
-        const val = numeric ? +v : v;
-        const owned = !priced || g.econ.ownsPart(id, key, val);
-        const isPv = pv && pv.key === key && pv.val === val;
-        const b = h('button', 'chip' + (view[key] === val ? ' sel' : '') + (isPv ? ' preview' : '') + (owned ? '' : ' forsale'));
-        b.textContent = n;
-        if (priced) {
-          const sm = h('small');
-          sm.textContent = owned ? (cu[key] === val ? 'FITTED' : 'OWNED') : money(g.econ.price(key, val));
-          b.appendChild(sm);
-        }
-        b.onclick = () => {
-          g.audio.click();
-          if (owned) { this.cuPreview = null; set(key, val, rebuild); }
-          else { this.cuPreview = { id, key, val, name: n }; this.renderCustom(); }
-        };
-        w.appendChild(b);
-      }
-      body.appendChild(w);
-    };
-    if (this.cuTab === 'paint') {
-      swatches('COLOR', O.colors, 'color');
-      const ci = h('div', 'color-input', '<span>CUSTOM</span>');
-      const inp = h('input');
-      inp.type = 'color';
-      inp.value = cu.color;
-      inp.oninput = () => { cu.color = inp.value; g.setCustom(id, cu, false); };
-      inp.onchange = () => this.renderCustom();
-      ci.appendChild(inp);
-      body.appendChild(ci);
-      chips('FINISH', O.finishes, 'finish', true);
-    } else if (this.cuTab === 'wheels') {
-      chips('STYLE', O.wheels, 'wheels');
-      swatches('RIM COLOR', O.rimColors, 'rimColor');
-      swatches('BRAKE CALIPERS', O.calipers, 'caliper');
-    } else if (this.cuTab === 'body') {
-      chips('SPOILER', O.spoilers, 'spoiler');
-      chips('BODY KIT', O.kits, 'kit');
-      body.appendChild(h('p', 'c-d', '<span style="color:#8d949c;font-size:13px">Tokyo Rivet is a bolt-on riveted widebody with a front splitter, canards and a ducktail; Outlaw Works adds huge boxy riveted over-fenders and a GT wing. Both widen the track and fit fatter tyres, and bring their own spoiler unless you fit another one. Wings and aggressive kits add downforce: more grip at speed.</span>'));
-    } else if (this.cuTab === 'stance') {
-      chips('SUSPENSION', O.suspension, 'suspension');
-      chips('WINDOW TINT', O.tints, 'tint', true, true);
-    } else if (this.cuTab === 'exhaust') {
-      chips('EXHAUST', O.exhausts, 'exhaust');
-      body.appendChild(h('p', '', '<span style="color:#8d949c;font-size:13px">Sport and straight-pipe exhausts are louder, pop and crackle more on lift-off, and add a little power.</span>'));
-    } else {
-      body.appendChild(h('h3', '', 'LICENSE PLATE'));
-      const inp = h('input');
-      inp.type = 'text';
-      inp.maxLength = 7;
-      inp.value = g.save.settings.plate || 'NO HESI';
-      inp.onchange = () => {
-        g.save.settings.plate = (inp.value || 'NO HESI').toUpperCase().slice(0, 7);
-        g.saveNow();
-        g.setCustom(id, cu, true);
-      };
-      body.appendChild(inp);
-      body.appendChild(h('p', '', '<span style="color:#8d949c;font-size:13px">Up to 7 characters. Applies to all your cars.</span>'));
-    }
-  }
-
-  _resetCustom() {
-    const g = this.game;
-    const id = this.garageSel || g.save.selectedCar;
-    this.cuPreview = null;
-    g.audio.click();
-    g.setCustom(id, { ...CAR_BY_ID[id].defaults }, true);
-    this.renderCustom();
   }
 
   /* ------------------------------------------------------------ challenges */

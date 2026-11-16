@@ -6,7 +6,9 @@ import { makeMonotone, clamp, lerp } from '../core/utils.js';
 import { plateTexture, blobShadowTexture, grilleMeshTexture, tireTexture } from '../world/textures.js';
 import { RoundedBoxGeometry } from 'three/examples/jsm/geometries/RoundedBoxGeometry.js';
 import { interiorFor } from '../config/interiors.js';
+import { normalizeCustom } from '../config/parts.js';
 import { brakeDiscTexture, orangePeelNormal, headlampTexture, taillampTexture, thinLampTexture } from '../camera/interiorTextures.js';
+import { glowTexture } from '../world/textures.js';
 const roundBox = (w, h, d, r) => new RoundedBoxGeometry(w, h, d, 2, Math.min(r, w / 2 - 1e-3, h / 2 - 1e-3, d / 2 - 1e-3));
 
 /* ------------------------------------------------------------ templates */
@@ -109,11 +111,24 @@ export const FLARE_KITS = {
   outlaw: { ext: 0.09, band: 0.095, tyre: 1.2, leg: 0.1, shape: 'boxy' },
 };
 
+/** Body drop (m, positive = lower) for a customisation: the mean of front and rear ride height. */
+export function rideLower(custom = {}) {
+  if (custom.rideF !== undefined || custom.rideR !== undefined) return clamp(-((custom.rideF || 0) + (custom.rideR || 0)) / 2000, -0.03, 0.09);
+  return custom.suspension === 'slammed' ? 0.07 : custom.suspension === 'lowered' ? 0.035 : 0;
+}
+/** Nose-down (negative) / tail-down rake of the body, radians, from the front/rear ride heights. */
+export function rideRake(def, custom = {}) {
+  return ((custom.rideF || 0) - (custom.rideR || 0)) / 1000 / def.body.wb;
+}
+
 /** Geometric context for a body definition. */
 export function bodyContext(b, custom = {}, hi = true) {
   const L = b.L, W = b.W;
-  const widen = custom.kit === 'wide' ? 0.07 : 0;
-  const lower = custom.suspension === 'slammed' ? 0.07 : custom.suspension === 'lowered' ? 0.035 : 0;
+  const fend = custom.fenders ?? (['wide', 'rivet', 'outlaw'].includes(custom.kit) ? custom.kit : 'stock');
+  const widen = fend === 'wide' ? 0.07 : 0;
+  // ride height: the body is built at the average of front and rear (the difference is a rake angle on
+  // the body); older presets map to fixed drops
+  const lower = rideLower(custom);
   const top0 = makeMonotone(b.top);
   const bot0 = makeMonotone(b.bottom);
   // a real car's nose and tail are near-vertical faces (bumper lip low, bonnet / boot edge high), not a
@@ -153,10 +168,10 @@ export function bodyContext(b, custom = {}, hi = true) {
   const tFA = b.fa; // front axle t
   const zf = -L / 2 + tFA * L, zr = zf + b.wb;
   const tRA = (zr + L / 2) / L;
-  const fk = FLARE_KITS[custom.kit] || null;
+  const fk = FLARE_KITS[fend] || null;
   const tw0 = b.tw ?? 0.25;
   const wr = b.wr, tw = tw0 * (fk ? fk.tyre : 1);
-  const lowerAmt = custom.suspension === 'slammed' ? 0.07 : custom.suspension === 'lowered' ? 0.035 : 0;
+  const lowerAmt = Math.max(0, lower);
   const archR = wr + 0.03 + lowerAmt * 0.85;
   const z = (t) => -L / 2 + t * L;
   const hw = (t) => {
@@ -227,6 +242,7 @@ export function bodyContext(b, custom = {}, hi = true) {
     if (yn < 0 || yn > 1) return 0;
     return hw(t) * templateX(tpl, yn);
   };
+  ctx.mirrorScale = custom.mirrors === 'aero' ? 0.8 : 1;
   if (fk) {
     // over-fenders: work out where each one can sit on this body, then push the tyres out to fill them
     ctx.flare = { ...fk, axles: {} };
@@ -489,11 +505,13 @@ const DEEP_DISH = {
   dish5: { depth: 0.12, lip: 0.15, step: true },
   sdish: { depth: 0.14, lip: 0.22, step: true },
   steelie: { depth: 0.07, lip: 0.1 },
+  slot5: { depth: 0.055, lip: 0.12 },
 };
 
-export function wheelGeometries(r, w, style, hi = true) {
+export function wheelGeometries(r, w, style, hi = true, size = 0) {
   const seg = hi ? 28 : 14;
-  const rr = r * (hi ? 0.7 : 0.66);
+  // rim radius: one inch of rim size is 12.7 mm of radius; the tyre's outer size stays the same
+  const rr = Math.min(r - 0.045, r * (hi ? 0.7 : 0.66) + size * 0.0127);
   const tireProf = [
     [rr, -w / 2], [r - 0.035, -w / 2], [r - 0.008, -w / 2 + 0.03], [r, -w / 2 + 0.06],
     [r, w / 2 - 0.06], [r - 0.008, w / 2 - 0.03], [r - 0.035, w / 2], [rr, w / 2],
@@ -597,6 +615,9 @@ export function wheelGeometries(r, w, style, hi = true) {
     }
     parts.push(new THREE.CylinderGeometry(hub * 1.25, hub * 1.4, 0.03, 20).rotateZ(Math.PI / 2).translate(face + 0.012, 0, 0));
     lipParts.push(new THREE.SphereGeometry(hub * 1.15, 18, 8, 0, Math.PI * 2, 0, Math.PI / 2).scale(0.45, 1, 1).rotateZ(-Math.PI / 2).translate(face + 0.026, 0, 0));
+  } else if (style === 'slot5') {
+    // classic five-slot mag: five broad spokes leave five long slots, polished lip
+    for (let i = 0; i < 5; i++) parts.push(spoke((i / 5) * Math.PI * 2, 0.115, 0.03, hub * 0.85, spokeR, 0, 0.92));
   } else if (style === 'fan') {
     // turbofan: a closed face with sixteen angled vanes, like 80s touring cars
     parts.push(new THREE.CylinderGeometry(rr * 0.9, rr * 0.9, 0.012, seg * 2).rotateZ(Math.PI / 2).translate(face - 0.004, 0, 0));
@@ -991,7 +1012,8 @@ export function mirrorPose(ctx) {
   const tm = c.t0 + 0.04;
   const wb = ctx.hw(tm) * (c.wBot ?? 0.86);
   const y = ctx.top(tm) - ctx.lower + 0.075;
-  return { tm, z: ctx.z(tm) + 0.03, y, xIn: wb - 0.03, x: wb + 0.14, rx: 0.1, ry: 0.058, rz: 0.07 };
+  const k = ctx.mirrorScale ?? 1; // aero mirrors are smaller and sleeker
+  return { tm, z: ctx.z(tm) + 0.03, y, xIn: wb - 0.03, x: wb + 0.14 - (1 - k) * 0.03, rx: 0.1 * k, ry: 0.058 * k * (k < 1 ? 0.85 : 1), rz: 0.07 * (k < 1 ? 0.9 : 1) };
 }
 
 /**
@@ -1121,8 +1143,21 @@ function overFenders(S, ctx, hi) {
   }
 }
 
+/** The body's own feature flags plus what the fitted hood / fender / roof parts add. */
+function bodyWithParts(b0, custom) {
+  const b = { ...b0 };
+  const front = !b0.louvres || b0.louvres < 0.5; // mid / rear-engined cars carry engine louvres behind the cabin
+  if (custom.fenders === 'vented') b.gills = true;
+  const hoodT = b0.cabin ? Math.min(0.2, b0.cabin.t0 - 0.09) : 0.2;
+  if ((custom.hoodType === 'vented' || custom.hoodType === 'carbonVented') && !b0.hoodVents && !b0.hoodLouvre && !b0.hoodVent) b.hoodVents = hoodT;
+  if (custom.hoodType === 'scoop' && !b0.scoop && front) b.scoop = Math.min(0.17, hoodT - 0.02);
+  if (custom.roofMod === 'spoiler') b.roofSpoiler = true;
+  if (custom.roofMod === 'scoop') b.roofScoop = true;
+  return b;
+}
+
 export function carParts(def, custom = {}, hi = true) {
-  const b = def.body;
+  const b = bodyWithParts(def.body, custom);
   const ctx = bodyContext(b, custom, hi);
   const S = { paint: [], glass: [], trim: [], decal: [], mesh: [], amber: [], amberL: [], amberR: [], chrome: [], head: [], drl: [], lens: [], tail: [], rev: [], plate: [], interior: [], kit: [], body2: [], cabinTop: [], cover: [], head2: [], tips: [] };
   const lamps = { head: [], tail: [], ind: [], rev: [], exhaust: [] };
@@ -1590,7 +1625,8 @@ export function carParts(def, custom = {}, hi = true) {
   // ---- Exhaust
   const ex = b.exhaust || 'dual';
   const ey = ybr + 0.04;
-  const big = custom.exhaust === 'straight' || custom.exhaust === 'sport' ? 1.25 : 1;
+  const tipStyle = custom.tips || 'stock';
+  const big = (custom.exhaust === 'straight' || custom.exhaust === 'sport' ? 1.25 : 1) * (tipStyle === 'polished' ? 1.2 : tipStyle === 'dualwall' ? 1.12 : 1);
   // 'none' = electric (no tips, no silencer); 'oval' = big flattened oval tips in the diffuser
   const exX = ex === 'none' ? [] : ex === 'triple' ? [-0.11, 0, 0.11] : ex === 'single' ? [-W * 0.3] : ex === 'quad' ? [-W * 0.32, -W * 0.24, W * 0.24, W * 0.32] : ex === 'center' ? [-0.07, 0.07] : ex === 'oval' ? [-W * 0.31, W * 0.31] : [-W * 0.3, W * 0.3];
   const er = 0.045 * big;
@@ -1601,6 +1637,11 @@ export function carParts(def, custom = {}, hi = true) {
     // exhaust tips get their own material (burnt titanium on straight pipes) so other chrome keeps its colour
     S.tips.push(new THREE.CylinderGeometry(er, er * 0.94, 0.12, 16, 1, true).rotateX(Math.PI / 2).scale(ovalX, 1, 1).translate(x, ey - low, z - 0.06));
     S.tips.push(new THREE.TorusGeometry(er * 0.97, 0.006, 6, 16).scale(ovalX, 1, 1).translate(x, ey - low, z));
+    if (tipStyle === 'dualwall') {
+      // inner wall of a double-wall tip, set back slightly
+      S.tips.push(new THREE.CylinderGeometry(er * 0.74, er * 0.74, 0.06, 16, 1, true).rotateX(Math.PI / 2).scale(ovalX, 1, 1).translate(x, ey - low, z - 0.03));
+      S.tips.push(new THREE.TorusGeometry(er * 0.75, 0.005, 6, 16).scale(ovalX, 1, 1).translate(x, ey - low, z - 0.003));
+    }
     S.trim.push(new THREE.CircleGeometry(er * 0.9, 14).scale(ovalX, 1, 1).translate(x, ey - low, z - 0.035));
     lamps.exhaust.push([x, ey - low, z + 0.02]);
   }
@@ -1629,6 +1670,7 @@ export function carParts(def, custom = {}, hi = true) {
   if (b.cabin) {
     const c = b.cabin;
     const mp = mirrorPose(ctx);
+    const aero = custom.mirrors === 'aero';
     both((sx) => {
       // rounded-box housing: squash a sphere toward a box, taper the inner end
       const hous = new THREE.SphereGeometry(1, hi ? 16 : 8, hi ? 12 : 6);
@@ -1637,13 +1679,16 @@ export function carParts(def, custom = {}, hi = true) {
         let x = hp.getX(i), y = hp.getY(i), z = hp.getZ(i);
         x = Math.sign(x) * Math.pow(Math.abs(x), 0.55); y = Math.sign(y) * Math.pow(Math.abs(y), 0.6); z = Math.sign(z) * Math.pow(Math.abs(z), 0.7);
         const taper = 1 - 0.22 * (1 - x * sx) / 2;
-        hp.setXYZ(i, x * mp.rx, y * mp.ry * taper, z < 0 ? z * mp.rz * 1.15 : z * mp.rz * 0.7);
+        hp.setXYZ(i, x * mp.rx, y * mp.ry * taper, z < 0 ? z * mp.rz * (aero ? 1.5 : 1.15) : z * mp.rz * 0.7);
       }
       hous.computeVertexNormals();
       hous.translate(sx * mp.x, mp.y, mp.z);
       S.paint.push(hous);
       const stalkLen = mp.x - mp.rx * 0.6 - mp.xIn;
-      S.trim.push(new THREE.BoxGeometry(stalkLen, 0.026, 0.05).translate(sx * (mp.xIn + stalkLen / 2), mp.y - 0.025, mp.z));
+      if (aero) {
+        // race mirror: two slim blades instead of a stalk
+        for (const dz of [-0.022, 0.022]) S.trim.push(new THREE.BoxGeometry(stalkLen + 0.03, 0.008, 0.012).rotateZ(sx * 0.18).translate(sx * (mp.xIn + stalkLen / 2), mp.y - 0.03, mp.z + dz));
+      } else S.trim.push(new THREE.BoxGeometry(stalkLen, 0.026, 0.05).translate(sx * (mp.xIn + stalkLen / 2), mp.y - 0.025, mp.z));
       S.glass.push(new THREE.CircleGeometry(1, hi ? 20 : 10).scale(mp.rx * 0.86, mp.ry * 0.8, 1).translate(sx * mp.x, mp.y, mp.z + mp.rz * 0.7 + 0.002));
     });
     if (hi) {
@@ -1801,41 +1846,107 @@ export function carParts(def, custom = {}, hi = true) {
     }
   }
 
-  // ---- Body kit
-  const kit = custom.kit || 'stock';
+  // ---- Body kit: each slot is its own part
+  const fend = custom.fenders ?? (['wide', 'rivet', 'outlaw'].includes(custom.kit) ? custom.kit : 'stock');
+  // older single-preset kits (still used by traffic definitions) map onto the slots
+  const kit = custom.kit;
+  const lvl = (k) => custom[k] ?? (kit === 'street' ? 'street' : kit && kit !== 'stock' ? 'sport' : 'none');
+  const splitter = lvl('splitter'), skirts = lvl('skirts'), diffuser = lvl('diffuser');
+  const fBumper = custom.fBumper ?? (kit && kit !== 'stock' && kit !== 'street' ? 'sport' : 'stock');
+  const rBumper = custom.rBumper ?? 'stock';
   const yb = b.bottom[2]?.[1] ?? 0.18;
   const yfb = yLip;
-  if (kit !== 'stock') {
-    const agg = kit === 'aggressive' || kit === 'wide' || !!ctx.flare;
-    // splitter hangs under the lowest edge of the front bumper and reaches just past its face
+  const TIER = { none: 0, stock: 0, street: 1, sport: 2, track: 3 };
+  if (TIER[splitter]) {
+    // splitter hangs under the lowest edge of the front bumper and reaches past its face
+    const k = TIER[splitter];
     let yLow = Infinity;
     for (let t = 0.0; t <= 0.09; t += 0.005) yLow = Math.min(yLow, ctx.bot(t));
     const ySp = Math.max(yLow + 0.012, Math.min(yfb - 0.004, yLow + 0.06));
-    S.kit.push(outlinePlate(ctx, true, ySp, W * (agg ? 0.44 : 0.42), agg ? 0.04 : 0.025, 0.32, 0.018));
+    const hwS = W * [0, 0.42, 0.44, 0.47][k], over = [0, 0.025, 0.04, 0.07][k];
+    S.kit.push(outlinePlate(ctx, true, ySp, hwS, over, 0.32, [0, 0.018, 0.018, 0.022][k]));
+    if (k === 3) {
+      // endplates at the splitter's corners and a pair of support rods up to the bumper
+      const zEdge = (x) => (surfZ(ctx, x, ySp + 0.02, true) ?? ctx.z(0.03)) - over;
+      both((sx) => {
+        const x = sx * (hwS - 0.015);
+        S.kit.push(new THREE.BoxGeometry(0.012, 0.075, 0.2).translate(x, ySp - low + 0.03, zEdge(x) + 0.1));
+        const xr = sx * hwS * 0.55, zr = zEdge(xr) + 0.04;
+        const zTop = (surfZ(ctx, xr, ySp + 0.12, true) ?? zr) + 0.01;
+        const a = new THREE.Vector3(xr, ySp - low + 0.012, zr), c = new THREE.Vector3(xr, ySp - low + 0.12, zTop);
+        const rod = new THREE.CylinderGeometry(0.005, 0.005, a.distanceTo(c), 6);
+        rod.applyQuaternion(new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 1, 0), c.clone().sub(a).normalize()));
+        S.chrome.push(rod.translate((a.x + c.x) / 2, (a.y + c.y) / 2, (a.z + c.z) / 2));
+      });
+    }
+  }
+  if (TIER[skirts]) {
+    const k = TIER[skirts];
     const skirtLen = ctx.zr - ctx.zf - ctx.archR * 2 - 0.08;
+    const t = (ctx.tFA + ctx.tRA) / 2;
+    const xs = ctx.halfWAt(t, yb + 0.06);
     both((sx) => {
-      const t = (ctx.tFA + ctx.tRA) / 2;
-      const xs = ctx.halfWAt(t, yb + 0.06);
-      S.kit.push(new THREE.BoxGeometry(0.05, 0.07, skirtLen).translate(sx * (Math.max(xs, ctx.hw(t) * 0.9) - 0.005), yb + 0.02 - low, (ctx.zf + ctx.zr) / 2));
-    });
-    S.kit.push(outlinePlate(ctx, false, ybr - 0.006, W * 0.32, 0.03, 0.34, 0.025));
-    if (hi) for (let i = -2; i <= 2; i++) {
-      const zR = (surfZ(ctx, i * 0.16, ybr + 0.03, false) ?? ctx.z(0.97));
-      S.kit.push(new THREE.BoxGeometry(0.012, 0.09, 0.26).translate(i * 0.16, ybr - 0.05 - low, zR - 0.1));
-    }
-    if (agg) {
-      both((sx) => S.kit.push(placeBox(ctx, true, sx * (W / 2 - 0.13), yfb + 0.11, 0.16, 0.012, 0.12, 0.035, sx * 0.25)));
-    }
-    if (ctx.flare) overFenders(S, ctx, hi);
-    if (kit === 'wide') {
-      for (const za of [ctx.zf, ctx.zr]) {
-        both((sx) => {
-          const tq = (za + L / 2) / L;
-          const tor = new THREE.TorusGeometry(ctx.archR + 0.02, 0.05, 6, 16, Math.PI).rotateY(Math.PI / 2);
-          tor.translate(sx * (ctx.hw(tq) - 0.01), ctx.wr - low, za);
-          S.kit.push(tor);
-        });
+      const w = [0, 0.05, 0.06, 0.075][k], hgt = [0, 0.07, 0.085, 0.09][k];
+      S.kit.push(new THREE.BoxGeometry(w, hgt, skirtLen).translate(sx * (Math.max(xs, ctx.hw(t) * 0.9) - 0.005 + (w - 0.05) / 2), yb + 0.02 - low - (hgt - 0.07) / 2, (ctx.zf + ctx.zr) / 2));
+      if (k === 3 && hi) {
+        // small winglets ahead of the rear wheels
+        const zW = ctx.zr - ctx.archR - 0.1;
+        S.kit.push(new THREE.BoxGeometry(0.11, 0.008, 0.16).translate(sx * (Math.max(xs, ctx.hw(t) * 0.9) + 0.06), yb + 0.05 - low, zW));
       }
+    });
+  }
+  if (TIER[diffuser]) {
+    const k = TIER[diffuser];
+    S.kit.push(outlinePlate(ctx, false, ybr - 0.006, W * [0, 0.3, 0.32, 0.36][k], [0, 0.02, 0.03, 0.05][k], 0.34, 0.025));
+    if (hi) {
+      const n = [0, 3, 5, 7][k], gap = [0, 0.2, 0.16, 0.13][k], fh = [0, 0.07, 0.09, 0.13][k];
+      for (let i = 0; i < n; i++) {
+        const x = (i - (n - 1) / 2) * gap;
+        const zR = (surfZ(ctx, x, ybr + 0.03, false) ?? ctx.z(0.97));
+        S.kit.push(new THREE.BoxGeometry(0.012, fh, 0.26 + (k === 3 ? 0.06 : 0)).translate(x, ybr - 0.005 - fh / 2 - low, zR - 0.1 + (k === 3 ? 0.03 : 0)));
+      }
+    }
+  }
+  if (fBumper !== 'stock') {
+    const track = fBumper === 'track';
+    // canards on the bumper corners (two pairs on the track bumper)
+    for (const dy of track ? [0.11, 0.045] : [0.11]) both((sx) => S.kit.push(placeBox(ctx, true, sx * (W / 2 - 0.13), yfb + dy, 0.16, 0.012, 0.12, 0.035, sx * 0.25)));
+    if (hi) {
+      // brake-cooling intakes at the bumper corners
+      both((sx) => {
+        const x0 = sx * (W / 2 - 0.3), x1 = sx * (W / 2 - (track ? 0.12 : 0.16));
+        const q = rectQuad(Math.min(x0, x1), Math.max(x0, x1), yfb + 0.03, yfb + (track ? 0.12 : 0.1));
+        S.mesh.push(worldUV(faceDecal(ctx, true, sx > 0 ? q : mirrorQuad(q), 0.006, 4, 2), 9));
+      });
+      if (track) {
+        // red tow strap on the driver's side of the bumper
+        const x = -W * 0.22, y = yfb + 0.06;
+        const z = (surfZ(ctx, x, y, true) ?? ctx.z(0.02)) - 0.01;
+        S.tail.push(new THREE.BoxGeometry(0.03, 0.09, 0.012).translate(x, y - low, z));
+      }
+    }
+  }
+  if (rBumper !== 'stock') {
+    // black lower valance across the rear
+    S.kit.push(outlinePlate(ctx, false, ybr + 0.02, W * 0.4, 0.012, 0.18, 0.05));
+    if (rBumper === 'track' && hi) {
+      // centre rain light and a tow strap
+      const zr = (surfZ(ctx, 0, ybr + 0.06, false) ?? ctx.z(0.98)) + 0.012;
+      S.kit.push(new THREE.BoxGeometry(0.12, 0.05, 0.03).translate(0, ybr + 0.06 - low, zr));
+      S.tail.push(new THREE.BoxGeometry(0.1, 0.03, 0.004).translate(0, ybr + 0.06 - low, zr + 0.016));
+      const xs = W * 0.24, zs = (surfZ(ctx, xs, ybr + 0.05, false) ?? ctx.z(0.98)) + 0.008;
+      S.tail.push(new THREE.BoxGeometry(0.03, 0.08, 0.012).translate(xs, ybr + 0.05 - low, zs));
+    }
+  }
+  if (ctx.flare) overFenders(S, ctx, hi);
+  if (fend === 'wide') {
+    for (const za of [ctx.zf, ctx.zr]) {
+      both((sx) => {
+        const tq = (za + L / 2) / L;
+        const tor = new THREE.TorusGeometry(ctx.archR + 0.02, 0.05, 6, 16, Math.PI).rotateY(Math.PI / 2);
+        tor.translate(sx * (ctx.hw(tq) - 0.01), ctx.wr - low, za);
+        S.kit.push(tor);
+      });
     }
   }
   // Hood scoop
@@ -1845,9 +1956,12 @@ export function carParts(def, custom = {}, hi = true) {
   }
   // ---- Spoilers
   let sp = custom.spoiler ?? b.spoiler ?? 'none';
-  // the widebody kits come with their signature rear aero unless another spoiler is fitted
-  if (sp === 'none' && kit === 'rivet') sp = 'duck';
-  if (sp === 'none' && kit === 'outlaw') sp = 'gt';
+  let wingT = custom.wing ?? 'none';
+  // older saves and traffic definitions kept wings in the spoiler slot
+  if (sp === 'wing' || sp === 'gt') { if (wingT === 'none') wingT = sp; sp = 'none'; }
+  // the widebody kits come with their signature rear aero unless a spoiler or wing is fitted
+  if (sp === 'none' && wingT === 'none' && fend === 'rivet') sp = 'duck';
+  if (wingT === 'none' && fend === 'outlaw') wingT = 'gt';
   const tDeck = b.deckT ?? 0.94;
   const deckY0 = ctx.top(tDeck) - low - ctx.dip(tDeck, 0);
   const deckZ0 = ctx.z(tDeck);
@@ -1898,9 +2012,11 @@ export function carParts(def, custom = {}, hi = true) {
     const g = taperEnds(new THREE.ExtrudeGeometry(sh, { depth: w, bevelEnabled: true, bevelThickness: 0.01, bevelSize: 0.01, bevelSegments: 2, curveSegments: 8, steps: 20 }), w, z1 - z0, y1 - y0);
     g.translate(0, 0, -w / 2).rotateY(-Math.PI / 2);
     S.paint.push(g.translate(0, y0, z0));
-  } else if (sp === 'wing' || sp === 'gt') {
-    let hgt = sp === 'gt' ? 0.38 : 0.24;
-    const chord = sp === 'gt' ? 0.34 : 0.26;
+  }
+  if (wingT === 'wing' || wingT === 'gt' || wingT === 'swan') {
+    const race = wingT !== 'wing';
+    let hgt = wingT === 'gt' ? 0.38 : wingT === 'swan' ? 0.4 : 0.24;
+    const chord = race ? 0.34 : 0.26;
     let deckY = deckY0, deckZ = deckZ0, spW = spW0;
     if (b.wingOnRoof && b.cabin) {
       // estates carry a wing at the trailing edge of the roof, on short stands, never across the tailgate glass
@@ -1908,7 +2024,7 @@ export function carParts(def, custom = {}, hi = true) {
       deckY = c.roof + (c.crown ?? 0.03) * 0.3 - low - 0.01;
       deckZ = ctx.z(c.t2) - 0.06;
       spW = 2 * (ctx.hw(c.t2) * (c.wBot ?? 0.86) * (1 - (c.tumble ?? 0.2)) - 0.02);
-      hgt = sp === 'gt' ? 0.13 : 0.09;
+      hgt = race ? 0.13 : 0.09;
     }
     const shape = new THREE.Shape();
     shape.moveTo(0, 0);
@@ -1917,11 +2033,25 @@ export function carParts(def, custom = {}, hi = true) {
     const g = new THREE.ExtrudeGeometry(shape, { depth: spW * 1.02, bevelEnabled: false, curveSegments: 8 });
     g.translate(0, 0, -spW * 0.51).rotateY(-Math.PI / 2).rotateX(0.12);
     g.translate(0, deckY + hgt, deckZ - chord * 0.3);
-    (sp === 'gt' ? S.kit : S.paint).push(g);
+    (race ? S.kit : S.paint).push(g);
     both((sx) => {
-      // uprights start just under the deck surface so they never float
-      S.kit.push(new THREE.BoxGeometry(0.02, hgt + 0.04, 0.1).translate(sx * spW * 0.33, deckY + hgt / 2 - 0.02, deckZ));
-      const eh = sp === 'gt' ? 0.15 : 0.1;
+      if (wingT === 'swan' && !b.wingOnRoof) {
+        // swan-neck mounts rise behind the wing and hook over onto its top surface, leaving the underside clean
+        const x = sx * spW * 0.3;
+        const yTop = deckY + hgt + 0.035, zMid = deckZ - chord * 0.3 + chord * 0.45;
+        const pts = [
+          new THREE.Vector3(x, deckY - 0.02, deckZ + 0.02),
+          new THREE.Vector3(x, deckY + hgt * 0.55, deckZ + 0.05),
+          new THREE.Vector3(x, yTop + 0.07, zMid + 0.04),
+          new THREE.Vector3(x, yTop + 0.055, zMid - 0.06),
+          new THREE.Vector3(x, yTop - 0.004, zMid - 0.08),
+        ];
+        S.kit.push(new THREE.TubeGeometry(new THREE.CatmullRomCurve3(pts), 20, 0.011, 8, false).scale(0.7, 1, 1));
+      } else {
+        // uprights start just under the deck surface so they never float
+        S.kit.push(new THREE.BoxGeometry(0.02, hgt + 0.04, 0.1).translate(sx * spW * 0.33, deckY + hgt / 2 - 0.02, deckZ));
+      }
+      const eh = race ? 0.15 : 0.1;
       const ep = new THREE.Shape();
       ep.moveTo(-0.04 * chord, -0.035); ep.lineTo(chord * 1.06, -0.05); ep.lineTo(chord * 1.06, eh);
       ep.quadraticCurveTo(chord * 0.55, eh * 0.95, chord * 0.12, eh * 0.45); ep.lineTo(-0.04 * chord, 0.02); ep.lineTo(-0.04 * chord, -0.035);
@@ -1941,6 +2071,69 @@ export function carParts(def, custom = {}, hi = true) {
       S.trim.push(new RoundedBoxGeometry(0.032, 0.022, len, 2, 0.009).translate(sx * xr, yRoof + 0.03, ctx.z(tm)));
       for (const f of [-0.5, 0, 0.5]) S.trim.push(new RoundedBoxGeometry(0.028, 0.04, 0.07, 2, 0.01).translate(sx * xr, yRoof + 0.006, ctx.z(tm) + f * (len - 0.08)));
     });
+  }
+  // ---- Roof accessories
+  const roofMod = custom.roofMod || 'none';
+  if (b.cabin && ['vortex', 'rack', 'box', 'lightbar'].includes(roofMod)) {
+    const c = b.cabin;
+    const wAt = (t) => ctx.hw(t) * (c.wBot ?? 0.86) * (1 - (c.tumble ?? 0.2));
+    // roof skin height at t and a normalised half-width position (crowned across, arched along)
+    const roofY = (t, xn = 0) => c.roof + (c.roofArc ?? 0.02) * Math.sin(clamp((t - c.t1) / (c.t2 - c.t1), 0, 1) * Math.PI) + (c.crown ?? 0.03) * (1 - xn * xn) - low;
+    if (roofMod === 'vortex') {
+      // shark-fin vortex generators across the roof's trailing edge
+      const t = c.t2 - 0.012, wt = wAt(t);
+      const fin = new THREE.Shape();
+      fin.moveTo(0, 0); fin.lineTo(0.075, 0); fin.quadraticCurveTo(0.07, 0.03, 0.06, 0.04); fin.lineTo(0, 0);
+      for (let i = 0; i < 7; i++) {
+        const xn = (i / 6 - 0.5) * 1.3;
+        const x = xn * wt;
+        const fg = new THREE.ExtrudeGeometry(fin, { depth: 0.004, bevelEnabled: false }).translate(-0.04, 0, -0.002).rotateY(-Math.PI / 2);
+        S.decal.push(fg.translate(x, roofY(t, xn) - 0.004, ctx.z(t) - 0.03));
+      }
+    } else {
+      // two crossbars on low feet (on the rails where the car has them)
+      const tA = lerp(c.t1, c.t2, 0.28), tB = lerp(c.t1, c.t2, 0.74);
+      const bars = [];
+      for (const t of [tA, tB]) {
+        const wt = wAt(t), xf = (wt - 0.075) * 0.86, xn = xf / wt;
+        const yFoot = b.roofRails ? roofY(t, xn) + 0.05 : roofY(t, xn) - 0.004;
+        const yBar = yFoot + 0.055;
+        S.trim.push(new RoundedBoxGeometry(xf * 2 + 0.08, 0.026, 0.05, 2, 0.008).translate(0, yBar, ctx.z(t)));
+        both((sx) => S.trim.push(new RoundedBoxGeometry(0.05, yBar - yFoot + 0.01, 0.07, 2, 0.01).translate(sx * xf, (yBar + yFoot) / 2, ctx.z(t))));
+        bars.push({ t, yBar, xf });
+      }
+      if (roofMod === 'box') {
+        // a sleek cargo box on the bars
+        const z0 = ctx.z(tA) - 0.25, z1 = ctx.z(tB) + 0.25, w = Math.min(0.85, bars[0].xf * 1.6);
+        const y0 = Math.max(bars[0].yBar, bars[1].yBar) + 0.013;
+        const bx = new RoundedBoxGeometry(w, 0.3, z1 - z0, 4, 0.1);
+        const p = bx.attributes.position;
+        for (let i = 0; i < p.count; i++) {
+          // tapered nose, flatter tail
+          const u = (p.getZ(i) - (-(z1 - z0) / 2)) / (z1 - z0);
+          if (p.getY(i) > 0) p.setY(i, p.getY(i) * (0.55 + 0.45 * Math.min(1, u * 2.4)));
+        }
+        bx.computeVertexNormals();
+        S.decal.push(bx.translate(0, y0 + 0.15, (z0 + z1) / 2));
+        // clamps from each bar up into the box floor
+        for (const bar of bars) both((sx) => {
+          const h = y0 - (bar.yBar + 0.013) + 0.02;
+          S.trim.push(new THREE.BoxGeometry(0.06, h, 0.07).translate(sx * w * 0.3, bar.yBar + 0.013 + h / 2 - 0.01, ctx.z(bar.t)));
+        });
+      }
+      if (roofMod === 'lightbar') {
+        // a pod of four round spotlamps over the windscreen, on the front bar
+        const { yBar } = bars[0];
+        const z = ctx.z(tA) - 0.06;
+        S.trim.push(new RoundedBoxGeometry(0.98, 0.1, 0.09, 2, 0.02).translate(0, yBar + 0.065, z));
+        for (let i = 0; i < 4; i++) {
+          const x = (i - 1.5) * 0.235;
+          S.chrome.push(new THREE.TorusGeometry(0.052, 0.009, 6, 20).translate(x, yBar + 0.065, z - 0.047));
+          S.head.push(new THREE.CircleGeometry(0.048, 20).rotateY(Math.PI).translate(x, yBar + 0.065, z - 0.046));
+          lamps.head.push([x, yBar + 0.065, z - 0.06]);
+        }
+      }
+    }
   }
   if (b.bed) {
     const t0 = b.bed;
@@ -2163,7 +2356,119 @@ export const PAINT_FINISHES = {
   pearl: { metalness: 0.35, roughness: 0.3, clearcoat: 1, clearcoatRoughness: 0.03, iridescence: 0.7, iridescenceIOR: 1.6 },
   matte: { metalness: 0.08, roughness: 0.72, clearcoat: 0, clearcoatRoughness: 0.5 },
   chrome: { metalness: 1.0, roughness: 0.07, clearcoat: 0.6, clearcoatRoughness: 0.02 },
+  satin: { metalness: 0.12, roughness: 0.48, clearcoat: 0.35, clearcoatRoughness: 0.32 },
 };
+export const RIM_FINISHES = {
+  gloss: { metalness: 0.85, roughness: 0.28 },
+  matte: { metalness: 0.35, roughness: 0.78 },
+  brushed: { metalness: 1, roughness: 0.42 },
+  polished: { metalness: 1, roughness: 0.12 },
+  chrome: { metalness: 1, roughness: 0.04, whiten: 0.65 },
+};
+export const HEADLIGHT_COLORS = { stock: 0xf2f6ff, white: 0xffffff, xenon: 0xb8d0ff, yellow: 0xffcf3a, warm: 0xffdcaa };
+export const SECTION_INDEX = { body: 0, contrast: 1, black: 2, carbon: 3 };
+export const WRAP_INDEX = { none: 0, twin: 1, center: 2, side: 3, lower: 4, fade: 5, hood: 6 };
+
+/** Window film: 0 % (clear) .. 95 % (limo). */
+export function tintFor(pct) {
+  const t = clamp((pct ?? 35) / 95, 0, 1);
+  return { color: new THREE.Color(0x2a323a).lerp(new THREE.Color(0x020203), Math.pow(t, 0.7)), opacity: 0.5 + 0.47 * t };
+}
+
+// procedural twill carbon weave in object space, shared by the paint and kit shaders
+const CARBON_GLSL = `
+vec3 carbonWeave(vec3 P, vec3 N) {
+  vec3 a = abs(N);
+  vec2 uv = a.y > 0.55 ? P.xz : (a.x > a.z ? P.zy : P.xy);
+  uv *= 95.0;
+  vec2 c = floor(uv), f = fract(uv);
+  float tw = mod(c.x + floor(c.y * 0.5), 2.0);
+  float s = tw > 0.5 ? f.x : f.y;
+  return vec3(0.018 + 0.03 * pow(sin(s * 3.14159), 2.0));
+}`;
+
+/**
+ * Paint regions: contrast roof / bonnet / mirrors (or black, or exposed carbon) and livery stripes, decided in
+ * the shader from the body-space position, so changing them never rebuilds the car. U holds the uniforms.
+ */
+function paintRegions(mat, U) {
+  const prev = mat.onBeforeCompile;
+  mat.onBeforeCompile = (sh, r) => {
+    prev?.call(mat, sh, r);
+    Object.assign(sh.uniforms, U);
+    sh.vertexShader = sh.vertexShader
+      .replace('#include <common>', '#include <common>\nvarying vec3 vObjP;\nvarying vec3 vObjN;')
+      .replace('#include <begin_vertex>', '#include <begin_vertex>\nvObjP = position;\nvObjN = normal;');
+    sh.fragmentShader = sh.fragmentShader
+      .replace('#include <common>', `#include <common>
+varying vec3 vObjP; varying vec3 vObjN;
+uniform int uRoof; uniform int uHood; uniform int uMirror; uniform int uWrap;
+uniform vec3 uColor2; uniform vec3 uWrapColor;
+uniform float uBelt; uniform float uSill; uniform float uSide; uniform float uHoodZ; uniform float uHalfW;
+uniform vec2 uCab; uniform vec3 uMir; uniform vec3 uMirR;
+${CARBON_GLSL}`)
+      .replace('#include <color_fragment>', `#include <color_fragment>
+{
+  vec3 P = vObjP; vec3 N = normalize(vObjN);
+  vec3 c = diffuseColor.rgb;
+  float ax = abs(P.x);
+  float topFace = clamp(step(0.3, N.y) + step(0.6, abs(N.z)) * step(uSill + 0.1, P.y), 0.0, 1.0);
+  if (uWrap == 1) c = mix(c, uWrapColor, step(0.06, ax) * step(ax, 0.18) * topFace);
+  else if (uWrap == 2) c = mix(c, uWrapColor, step(ax, 0.17) * topFace);
+  else if (uWrap == 3) c = mix(c, uWrapColor, step(0.55, abs(N.x)) * step(uSide, P.y) * step(P.y, uSide + 0.065));
+  else if (uWrap == 4) c = mix(c, uColor2, step(P.y, uSide));
+  else if (uWrap == 5) c = mix(c, uColor2, smoothstep(uBelt - 0.05, uSill + 0.05, P.y));
+  else if (uWrap == 6) c = mix(c, uWrapColor, step(0.05, ax) * step(ax, 0.13) * step(P.z, uHoodZ) * step(0.35, N.y));
+  vec3 dm = (vec3(ax, P.y, P.z) - uMir) / uMirR;
+  bool mirror = dot(dm, dm) < 1.0;
+  bool roof = !mirror && P.y > uBelt + 0.03 && P.z > uCab.x && P.z < uCab.y;
+  bool hood = !mirror && !roof && P.z < uHoodZ && N.y > 0.35 && ax < uHalfW * 0.8 && P.y > uBelt - 0.3;
+  int mode = mirror ? uMirror : roof ? uRoof : hood ? uHood : 0;
+  if (mode == 1) c = uColor2;
+  else if (mode == 2) c = vec3(0.012);
+  else if (mode == 3) c = carbonWeave(P, N);
+  diffuseColor.rgb = c;
+}`);
+  };
+  const key = mat.customProgramCacheKey?.bind(mat);
+  mat.customProgramCacheKey = () => (key ? key() : '') + '|paintRegions';
+  mat.needsUpdate = true;
+  return mat;
+}
+
+/** Aero parts in exposed carbon (object-space weave), switchable by uniform. */
+function kitCarbon(mat, U) {
+  const prev = mat.onBeforeCompile;
+  mat.onBeforeCompile = (sh, r) => {
+    prev?.call(mat, sh, r);
+    sh.uniforms.uKitCarbon = U.uKitCarbon;
+    sh.vertexShader = sh.vertexShader
+      .replace('#include <common>', '#include <common>\nvarying vec3 vObjP;\nvarying vec3 vObjN;')
+      .replace('#include <begin_vertex>', '#include <begin_vertex>\nvObjP = position;\nvObjN = normal;');
+    sh.fragmentShader = sh.fragmentShader
+      .replace('#include <common>', `#include <common>\nvarying vec3 vObjP; varying vec3 vObjN; uniform int uKitCarbon;\n${CARBON_GLSL}`)
+      .replace('#include <color_fragment>', '#include <color_fragment>\nif (uKitCarbon == 1) diffuseColor.rgb = carbonWeave(vObjP, normalize(vObjN));');
+  };
+  const key = mat.customProgramCacheKey?.bind(mat);
+  mat.customProgramCacheKey = () => (key ? key() : '') + '|kitCarbon';
+  mat.needsUpdate = true;
+  return mat;
+}
+
+/** Apply the paint-related settings of a customisation to a built car's materials (no rebuild needed). */
+export function applyPaint(car, cu) {
+  const U = car.paintU;
+  U.uRoof.value = SECTION_INDEX[cu.roofPaint] ?? 0;
+  U.uHood.value = SECTION_INDEX[cu.hoodPaint] ?? 0;
+  U.uMirror.value = SECTION_INDEX[cu.mirrorPaint] ?? 0;
+  U.uWrap.value = WRAP_INDEX[cu.wrap] ?? 0;
+  U.uColor2.value.set(cu.color2 || '#0c0d0f');
+  U.uWrapColor.value.set(cu.wrapColor || '#f2f2f0');
+  const km = cu.kitColor || 'black';
+  U.uKitCarbon.value = km === 'carbon' ? 1 : 0;
+  car.mats.kit.color.set(km === 'body' ? cu.color : km === 'contrast' ? (cu.color2 || '#0c0d0f') : km === 'carbon' ? '#ffffff' : '#15161a');
+  car.mats.kit.roughness = km === 'carbon' ? 0.25 : km === 'body' || km === 'contrast' ? 0.3 : 0.45;
+}
 
 const TINTS = [
   { color: 0x1f262c, opacity: 0.66 },
@@ -2173,26 +2478,34 @@ const TINTS = [
 ];
 
 /** Full-detail player/garage car: returns a structured object. */
-export function buildPlayerCar(def, custom, plateText = 'NO HESI') {
+export function buildPlayerCar(def, custom0, plateText = 'NO HESI') {
+  const custom = normalizeCustom(def, custom0);
   const { S, ctx, lamps } = carParts(def, custom, true);
   const fin = PAINT_FINISHES[custom.finish] || PAINT_FINISHES.metallic;
+  const tint = tintFor(custom.tintPct);
+  const rimF = RIM_FINISHES[custom.rimFinish] || RIM_FINISHES.gloss;
+  const headC = HEADLIGHT_COLORS[custom.headlights] ?? HEADLIGHT_COLORS.stock;
+  const tipC = { titanium: [0x6b5fa0, 0.26, 1], black: [0x18181a, 0.42, 0.3], polished: [0xe4e6e8, 0.1, 1], dualwall: [0xe4e6e8, 0.12, 1] }[custom.tips]
+    || (custom.exhaust === 'straight' ? [0x6b5fa0, 0.26, 1] : [0xd8dadc, 0.18, 1]);
   const mats = {
     // clear coat with a faint orange-peel ripple, so reflections waver slightly like real paint
     paint: new THREE.MeshPhysicalMaterial({ color: custom.color, envMapIntensity: 1.55, ...fin, clearcoatNormalMap: orangePeelNormal(), clearcoatNormalScale: new THREE.Vector2(0.035, 0.035) }),
-    glass: new THREE.MeshPhysicalMaterial({ color: TINTS[custom.tint ?? 1].color, metalness: 0.0, roughness: 0.02, transparent: true, opacity: Math.min(0.94, TINTS[custom.tint ?? 1].opacity + 0.08), envMapIntensity: 2.8, clearcoat: 1, clearcoatRoughness: 0.01, ior: 1.52, reflectivity: 0.6, specularIntensity: 1, depthWrite: true }),
+    glass: new THREE.MeshPhysicalMaterial({ color: tint.color, metalness: 0.0, roughness: 0.02, transparent: true, opacity: tint.opacity, envMapIntensity: 2.8, clearcoat: 1, clearcoatRoughness: 0.01, ior: 1.52, reflectivity: 0.6, specularIntensity: 1, depthWrite: true }),
     trim: new THREE.MeshStandardMaterial({ color: 0x0d0e10, roughness: 0.55, metalness: 0.2 }),
-    interior: new THREE.MeshStandardMaterial({ color: new THREE.Color(interiorFor(def).palette.seat).multiplyScalar(0.7), roughness: 0.8 }),
+    interior: new THREE.MeshStandardMaterial({ color: new THREE.Color(interiorFor(def, custom).palette.seat).multiplyScalar(0.7), roughness: 0.8 }),
     chrome: new THREE.MeshStandardMaterial({ color: 0xd8dadc, metalness: 1, roughness: 0.18 }),
-    tips: new THREE.MeshStandardMaterial({ color: custom.exhaust === 'straight' ? 0x6b5fa0 : 0xd8dadc, metalness: 1, roughness: custom.exhaust === 'straight' ? 0.26 : 0.18 }),
+    tips: new THREE.MeshStandardMaterial({ color: tipC[0], metalness: tipC[2], roughness: tipC[1] }),
     // lamp internals: polished reflector behind clear glass by day, glowing at night
-    head: new THREE.MeshStandardMaterial({ map: headlampTexture(), emissiveMap: headlampTexture(), color: 0xffffff, emissive: 0xf2f6ff, emissiveIntensity: 0.02, roughness: 0.16, metalness: 0.9 }),
-    head2: new THREE.MeshStandardMaterial({ map: thinLampTexture(), emissiveMap: thinLampTexture(), color: 0xffffff, emissive: 0xf2f6ff, emissiveIntensity: 0.02, roughness: 0.2, metalness: 0.85 }),
+    head: new THREE.MeshStandardMaterial({ map: headlampTexture(), emissiveMap: headlampTexture(), color: 0xffffff, emissive: headC, emissiveIntensity: 0.02, roughness: 0.16, metalness: 0.9 }),
+    head2: new THREE.MeshStandardMaterial({ map: thinLampTexture(), emissiveMap: thinLampTexture(), color: 0xffffff, emissive: headC, emissiveIntensity: 0.02, roughness: 0.2, metalness: 0.85 }),
     // clear polycarbonate lamp cover: adds only its reflection (black base, additive), like real lamp glass
     cover: new THREE.MeshStandardMaterial({ color: 0x000000, roughness: 0.03, metalness: 0, envMapIntensity: 1.4, transparent: true, blending: THREE.AdditiveBlending, depthWrite: false }),
-    drl: new THREE.MeshStandardMaterial({ color: 0xf4f8ff, emissive: 0xeaf2ff, emissiveIntensity: 1.1, roughness: 0.2 }),
+    drl: new THREE.MeshStandardMaterial({ color: 0xf4f8ff, emissive: custom.headlights === 'yellow' ? 0xffd860 : custom.headlights === 'xenon' ? 0xcfe0ff : 0xeaf2ff, emissiveIntensity: 1.1, roughness: 0.2 }),
     lens: new THREE.MeshStandardMaterial({ color: 0x0c0f13, roughness: 0.04, metalness: 0.7 }),
-    tail: new THREE.MeshStandardMaterial({ map: taillampTexture(), emissiveMap: taillampTexture(), color: 0xffffff, emissive: 0xff2a1a, emissiveIntensity: 0.35, roughness: 0.15 }),
-    plate: new THREE.MeshStandardMaterial({ map: plateTexture(plateText, def.plate || 'ca'), roughness: 0.4 }),
+    tail: custom.taillights === 'clear'
+      ? new THREE.MeshStandardMaterial({ emissiveMap: taillampTexture(), color: 0xd4d7db, metalness: 0.7, emissive: 0xff2a1a, emissiveIntensity: 0.35, roughness: 0.12 })
+      : new THREE.MeshStandardMaterial({ map: taillampTexture(), emissiveMap: taillampTexture(), color: custom.taillights === 'smoked' ? 0x6a6a6a : custom.taillights === 'dark' ? 0x303030 : 0xffffff, emissive: 0xff2a1a, emissiveIntensity: 0.35, roughness: 0.15 }),
+    plate: new THREE.MeshStandardMaterial({ map: plateTexture(custom.plate || plateText, custom.plateStyle || def.plate || 'ca'), roughness: 0.4 }),
     decal: new THREE.MeshPhysicalMaterial({ color: 0x07080a, roughness: 0.18, metalness: 0.35, clearcoat: 1, clearcoatRoughness: 0.05, envMapIntensity: 1.2 }),
     mesh: new THREE.MeshStandardMaterial({ map: grilleMeshTexture(), roughness: 0.62, metalness: 0.15 }),
     amber: new THREE.MeshStandardMaterial({ color: 0x8a4a06, emissive: 0xff8a10, emissiveIntensity: 0.25, roughness: 0.15 }),
@@ -2201,13 +2514,32 @@ export function buildPlayerCar(def, custom, plateText = 'NO HESI') {
     rev: new THREE.MeshStandardMaterial({ color: 0xd8dde3, emissive: 0xffffff, emissiveIntensity: 0, roughness: 0.1, metalness: 0.5 }),
     kit: new THREE.MeshStandardMaterial({ color: custom.kitColor === 'body' ? custom.color : 0x15161a, roughness: custom.kitColor === 'body' ? 0.3 : 0.45, metalness: 0.25 }),
     body2: new THREE.MeshStandardMaterial({ color: 0xdedede, roughness: 0.6 }),
-    rim: new THREE.MeshStandardMaterial({ color: custom.rimColor ?? 0xc9ccd0, metalness: 0.85, roughness: 0.28 }),
+    rim: new THREE.MeshStandardMaterial({ color: new THREE.Color(custom.rimColor ?? 0xc9ccd0).lerp(new THREE.Color(0xffffff), rimF.whiten ?? 0), metalness: rimF.metalness, roughness: rimF.roughness }),
     // polished deep-dish lips and barrels (seen from both sides inside the dish)
     lip: new THREE.MeshStandardMaterial({ color: 0xf4f6f8, metalness: 1, roughness: 0.2, envMapIntensity: 1.8, side: THREE.DoubleSide }),
-    tire: new THREE.MeshStandardMaterial({ map: tireTexture(), color: 0xb8b8b8, roughness: 0.9 }),
-    disc: new THREE.MeshStandardMaterial({ map: brakeDiscTexture(), color: 0xc8ccd2, metalness: 0.85, roughness: 0.45 }),
+    tire: new THREE.MeshStandardMaterial({ map: tireTexture(custom.tire, custom.tireLetter), color: 0xb8b8b8, roughness: custom.tire === 'track' ? 0.72 : 0.9 }),
+    disc: new THREE.MeshStandardMaterial({ map: brakeDiscTexture(), color: custom.brakes === 'track' ? 0x5a5c60 : 0xc8ccd2, metalness: 0.85, roughness: 0.45 }),
     caliper: new THREE.MeshStandardMaterial({ color: custom.caliper ?? 0xc8102e, roughness: 0.35, metalness: 0.2 }),
   };
+  // paint regions (two-tone sections, liveries) and carbon aero parts work from body-space positions
+  const cab = def.body.cabin;
+  const mpz = cab ? mirrorPose(ctx) : null;
+  const beltY = cab ? ctx.top((cab.t1 + cab.t2) / 2) - ctx.lower : 0.9;
+  const sillY = (def.body.bottom[2]?.[1] ?? 0.2) - ctx.lower + 0.04;
+  const paintU = {
+    uRoof: { value: 0 }, uHood: { value: 0 }, uMirror: { value: 0 }, uWrap: { value: 0 },
+    uColor2: { value: new THREE.Color() }, uWrapColor: { value: new THREE.Color() },
+    uBelt: { value: beltY }, uSill: { value: sillY }, uSide: { value: sillY + (beltY - sillY) * 0.42 },
+    uHoodZ: { value: cab ? ctx.z(cab.t0) - 0.02 : -ctx.L * 0.2 }, uHalfW: { value: ctx.W / 2 },
+    uCab: { value: new THREE.Vector2(cab ? ctx.z(cab.t0) : 0, cab ? ctx.z(Math.min(cab.t3, (cab.quarter ?? cab.t3) + 0.02)) : 0) },
+    uMir: { value: mpz ? new THREE.Vector3(mpz.x, mpz.y, mpz.z) : new THREE.Vector3(99, 0, 0) },
+    uMirR: { value: mpz ? new THREE.Vector3(mpz.rx * 1.35, mpz.ry * 1.15, mpz.rz * 1.6) : new THREE.Vector3(0.01, 0.01, 0.01) },
+    uKitCarbon: { value: 0 },
+  };
+  paintRegions(mats.paint, paintU);
+  kitCarbon(mats.kit, paintU);
+  const carObj = { mats, paintU };
+  applyPaint(carObj, custom);
   const root = new THREE.Group();
   const body = new THREE.Group();
   root.add(body);
@@ -2234,13 +2566,20 @@ export function buildPlayerCar(def, custom, plateText = 'NO HESI') {
     meshes[k] = m;
   }
   // Wheels
-  const wg = wheelGeometries(def.body.wr, ctx.tw, custom.wheels || 'five', true);
+  const wg = wheelGeometries(def.body.wr, ctx.tw, custom.wheels || 'five', true, Number(custom.wheelSize) || 0);
+  const brakeK = { sport: 1.15, track: 1.25 }[custom.brakes] ?? 1;
+  if (brakeK !== 1) { wg.caliper.scale(1, brakeK, brakeK); }
   const wheels = [];
   const axles = wheelLayout(def, ctx);
+  const DEG = Math.PI / 180;
   for (const a of axles) {
     for (const sx of [-1, 1]) {
       const pivot = new THREE.Group();
-      pivot.position.set(sx * (ctx.trackAt ? ctx.trackAt(a.z) : ctx.track) / 2, a.r, a.z);
+      // stance: wheel spacers push the wheel out, camber leans its top in
+      const tDelta = (a.steer ? custom.trackF : custom.trackR) / 1000 || 0;
+      const camber = (a.steer ? custom.camberF : custom.camberR) || 0;
+      pivot.position.set(sx * ((ctx.trackAt ? ctx.trackAt(a.z) : ctx.track) / 2 + tDelta), a.r, a.z);
+      pivot.rotation.z = sx * -camber * DEG;
       const flip = new THREE.Group();
       if (sx < 0) flip.rotation.y = Math.PI;
       pivot.add(flip);
@@ -2259,7 +2598,7 @@ export function buildPlayerCar(def, custom, plateText = 'NO HESI') {
       cal.rotation.x = (a.steer ? 0.6 : -0.6) * sx;
       flip.add(cal);
       root.add(pivot);
-      wheels.push({ pivot, spin, side: sx, front: a.steer, r: a.r, baseY: a.r });
+      wheels.push({ pivot, spin, side: sx, front: a.steer, r: a.r, baseY: a.r, baseX: pivot.position.x, axleTrack: (ctx.trackAt ? ctx.trackAt(a.z) : ctx.track) / 2 });
     }
   }
   // contact shadow on the ground (root stays level with the road; the body rolls above it)
@@ -2288,7 +2627,22 @@ export function buildPlayerCar(def, custom, plateText = 'NO HESI') {
     rearZ: ctx.L / 2,
     cabinW: c ? ctx.hw((c.t1 + c.t2) / 2) * (c.wBot ?? 0.86) : ctx.W / 2,
   };
-  return { root, body, meshes, mats, wheels, lamps, dims, ctx };
+  // ride height difference front to rear = rake on the body
+  dims.rake = rideRake(def, custom);
+  body.rotation.x = dims.rake;
+  // underglow: a coloured glow on the ground and a light under the floor
+  let underglow = null;
+  if (custom.underglow && custom.underglow !== 'off') {
+    const col = new THREE.Color(custom.underglow);
+    mats.glow = new THREE.MeshBasicMaterial({ map: glowTexture(), color: col.clone().multiplyScalar(1.6), transparent: true, opacity: 1, depthWrite: false, blending: THREE.AdditiveBlending, toneMapped: false, polygonOffset: true, polygonOffsetFactor: -3, polygonOffsetUnits: -6 });
+    const plane = new THREE.Mesh(new THREE.PlaneGeometry(ctx.W * 2.1, ctx.L * 1.35).rotateX(-Math.PI / 2).translate(0, 0.03, 0), mats.glow);
+    plane.renderOrder = 0;
+    const light = new THREE.PointLight(col, 28, 5, 1.5);
+    light.position.set(0, 0.14, 0);
+    root.add(plane, light);
+    underglow = { plane, light, color: col };
+  }
+  return { root, body, meshes, mats, wheels, lamps, dims, ctx, paintU, custom, underglow, lightColor: new THREE.Color(headC) };
 }
 
 export function disposeCar(car) {
@@ -2296,7 +2650,7 @@ export function disposeCar(car) {
     if (o.isMesh) o.geometry.dispose();
   });
   for (const m of new Set(Object.values(car.mats))) {
-    if (m.map && m.map !== blobShadowTexture() && m.map !== grilleMeshTexture() && m.map !== tireTexture() && m.map !== headlampTexture() && m.map !== taillampTexture() && m.map !== thinLampTexture()) m.map.dispose();
+    if (m.map && !m.map.userData?.shared && m.map !== blobShadowTexture() && m.map !== grilleMeshTexture() && m.map !== headlampTexture() && m.map !== taillampTexture() && m.map !== thinLampTexture()) m.map.dispose();
     m.dispose();
   }
 }

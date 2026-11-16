@@ -102,18 +102,25 @@
   </section>
 
   <!-- Customisation -->
-  <section id="s-custom" class="screen garage-screen">
-    <header class="screen-head"><button class="back" data-go="garage">‹ GARAGE</button><h2>CUSTOMIZE</h2><span id="cu-car" class="head-sub"></span><span id="cu-cash" class="head-cash"></span></header>
-    <div class="custom-panel">
-      <div id="cu-tabs" class="tabs"></div>
-      <div id="cu-body" class="cu-body"></div>
-      <div class="ci-actions">
-        <button id="btn-cu-reset" class="btn ghost small">RESET TO FACTORY</button>
-        <button id="btn-cu-rev" class="btn ghost small">REV ENGINE</button>
-        <button id="btn-cu-drive" class="btn primary small">DRIVE</button>
+  <section id="s-custom" class="screen cz">
+    <header class="cz-top">
+      <button class="back" id="cz-back">‹ GARAGE</button>
+      <div class="cz-title"><span class="cz-kicker">UPGRADES &amp; TUNING · <span id="cz-maker"></span></span><h2 id="cz-car"></h2></div>
+      <div class="cz-topr">
+        <button id="cz-rev" class="cz-btn small">REV ENGINE</button>
+        <button id="cz-drive" class="cz-btn small">DRIVE</button>
+        <div id="cz-pi" class="cz-pib"></div>
+        <div id="cz-cash" class="cz-cash"></div>
       </div>
-    </div>
-    <div class="drag-hint">Drag to rotate</div>
+    </header>
+    <nav id="cz-cats" class="cz-cats"><span id="cz-ind" class="cz-ind"></span></nav>
+    <aside id="cz-list" class="cz-list">
+      <div id="cz-crumb" class="cz-crumb"></div>
+      <div id="cz-rows" class="cz-rows"></div>
+    </aside>
+    <section id="cz-card" class="cz-card"></section>
+    <footer id="cz-hints" class="cz-hints"></footer>
+    <div id="cz-modal" class="cz-modal"></div>
   </section>
 
   <!-- Challenges -->

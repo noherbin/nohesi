@@ -1353,12 +1353,19 @@ export function floor(K) {
   const tb = add(new THREE.PlaneGeometry(half * 2, 0.3), I.dash === 'tub' ? m.carbon : m.carpet);
   tb.position.set(0, fy + 0.1, z0 - 0.08);
   tb.rotation.x = -0.75;
-  // floor mats with bound edges and the maker's colour on the driver's
-  for (const sx of [dx, -dx]) {
-    const mat = add(RB(0.42, 0.008, 0.5, 0.004), I.dash === 'luxury' ? m.carpet : m.rubber);
-    mat.position.set(sx, fy, eyeZ - 0.38);
-    const edge = add(RB(0.43, 0.004, 0.51, 0.003), sx === dx ? m.accent : m.stitch);
-    edge.position.set(sx, fy - 0.001, eyeZ - 0.38);
+  // floor mats with bound edges and the maker's colour on the driver's (or the player's choice of mats)
+  const mt = I.mats || 'stock';
+  if (mt !== 'none') {
+    const red = M(new THREE.MeshStandardMaterial({ color: 0xb0101c, roughness: 0.8 }));
+    const pile = mt === 'luxury' ? M(new THREE.MeshStandardMaterial({ color: new THREE.Color(K.P.carpet).lerp(new THREE.Color('#6a6258'), 0.35), roughness: 1, bumpMap: m.carpet.bumpMap, bumpScale: 3 })) : null;
+    const body = mt === 'rubber' ? m.rubber : mt === 'luxury' ? pile : mt === 'stock' ? (I.dash === 'luxury' ? m.carpet : m.rubber) : m.carpet;
+    for (const sx of [dx, -dx]) {
+      const mat = add(RB(0.42, mt === 'luxury' ? 0.016 : 0.008, 0.5, 0.004), body);
+      mat.position.set(sx, fy + (mt === 'luxury' ? 0.004 : 0), eyeZ - 0.38);
+      const edgeM = mt === 'carpetRed' ? red : mt === 'carpetAccent' ? m.stitch : mt === 'rubber' || mt === 'luxury' ? m.rubber : sx === dx ? m.accent : m.stitch;
+      const edge = add(RB(0.43, 0.004, 0.51, 0.003), edgeM);
+      edge.position.set(sx, fy - 0.001, eyeZ - 0.38);
+    }
   }
   // pedals hung from the bulkhead: drilled aluminium on sporty cars, rubber faces on the luxury saloon
   const face = I.dash === 'luxury' ? m.rubber : m.alu;

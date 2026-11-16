@@ -1,6 +1,7 @@
 // Vehicle dynamics: bicycle model with Pacejka-style tyres, load transfer, friction ellipse,
 // engine torque curves, gearbox with auto/manual shifting, turbo boost, aero drag and downforce.
 // 2D frame: X right, Y forward, heading clockwise from +Y, yaw rate positive = turning right.
+import { effectivePhys } from './upgrades.js';
 import { clamp, lerp, lookup, MPH_TO_MS } from '../core/utils.js';
 
 const G = 9.81;
@@ -28,14 +29,14 @@ export class VehiclePhysics {
   }
 
   configure(def, custom = {}) {
-    const p = def.phys, b = def.body;
+    // the car's own spec with every fitted upgrade and the stance settings applied
+    const p = effectivePhys(def, custom), b = def.body;
     this.def = def;
     this.m = p.mass;
     this.L = b.wb;
     this.b = this.L * p.weightFront; // CG to rear axle
     this.a = this.L - this.b; // CG to front axle
-    const lowered = custom.suspension === 'slammed' ? 2 : custom.suspension === 'lowered' ? 1 : 0;
-    this.h = p.cgH - lowered * 0.02;
+    this.h = p.cgH;
     this.track = b.W - 0.3;
     this.Iz = this.m * this.a * this.b * (p.inertia ?? 1);
     this.rw = b.wr;
@@ -55,13 +56,13 @@ export class VehiclePhysics {
     this.electric = !!def.engine.electric;
     this.turboLag = p.turboLag || 0.5;
     this.shiftTime = p.shiftTime ?? 0.18;
-    this.downforce = (p.downforce ?? 0.2) * (custom.spoiler === 'gt' ? 1.35 : custom.spoiler === 'wing' ? 1.15 : 1) * (custom.kit === 'aggressive' || custom.kit === 'wide' ? 1.1 : 1);
-    this.gripBonus = (custom.kit === 'wide' ? 1.03 : 1) * (lowered ? 1.01 : 1);
-    this.rollGain = p.rollGain * (1 - lowered * 0.18);
-    this.susFreq = p.susFreq * (1 + lowered * 0.12);
-    // power scaling (exhaust upgrades)
-    const hpMul = custom.exhaust === 'straight' ? 1.06 : custom.exhaust === 'sport' ? 1.03 : 1;
-    this.hp = p.hp * hpMul;
+    this.downforce = p.downforce;
+    this.gripBonus = 1;
+    this.rearGrip = p.rearGrip ?? 1;
+    this.launch = p.launch || 0;
+    this.rollGain = p.rollGain;
+    this.susFreq = p.susFreq;
+    this.hp = p.hp;
     // Torque scale so peak power == hp
     let best = 0, bestX = 0.8;
     for (let x = 0.2; x <= 1.0; x += 0.005) {
@@ -265,9 +266,10 @@ export class VehiclePhysics {
       const muO = 1 - sens * (fo / nom - 1), muI = 1 - sens * (fi / nom - 1);
       return (muO * fo + muI * fi) / Fz;
     };
-    const gm = this.mu * this.gripBonus * this.gripMul;
+    // drag radials, launch control and diffs add traction off the line, fading out by ~45 mph
+    const gm = this.mu * this.gripBonus * this.gripMul * (1 + this.launch * clamp(1 - speed / 20, 0, 1));
     const muF = gm * axleMu(Fzf, this.rollStiffFront);
-    const muR = gm * axleMu(Fzr, 1 - this.rollStiffFront) * (this.def.phys.rearGrip ?? 1);
+    const muR = gm * axleMu(Fzr, 1 - this.rollStiffFront) * this.rearGrip;
     const capF = muF * Fzf, capR = muR * Fzr;
 
     // ----- Slip angles & raw lateral demand

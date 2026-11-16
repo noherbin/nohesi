@@ -51,7 +51,7 @@ export class PlayerCar {
     const picks = lamps.length > 2 ? [lamps[0], lamps[lamps.length - 1]] : lamps;
     for (const l of picks) {
       // gentle decay keeps the near road from blowing out while the beam still reaches far
-      const sp = new THREE.SpotLight(0xfff2dc, 0, 150, 0.42, 0.8, 0.95);
+      const sp = new THREE.SpotLight(this.model.lightColor ? this.model.lightColor.clone().lerp(new THREE.Color(0xfff2dc), 0.35) : 0xfff2dc, 0, 150, 0.42, 0.8, 0.95);
       sp.position.set(l[0] * 0.9, l[1], l[2]);
       sp.target.position.set(l[0] * 0.6, 0.15, l[2] - 34);
       sp.castShadow = false;
@@ -158,7 +158,7 @@ export class PlayerCar {
     this._e.set(gradePitch, -P.heading, 0, 'YXZ');
     root.quaternion.setFromEuler(this._e);
     m.body.position.y = this.heave;
-    m.body.rotation.set(this.pitch, 0, this.roll);
+    m.body.rotation.set(this.pitch + (m.dims.rake || 0), 0, this.roll);
     // wheels
     for (const wh of m.wheels) {
       if (wh.front) wh.pivot.rotation.y = -P.steerAngle * 1.25;

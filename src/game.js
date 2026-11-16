@@ -22,6 +22,9 @@ import { GarageScene } from './garage/garageScene.js';
 import { UI, MODES } from './ui/ui.js';
 import { Leaderboard } from './gameplay/leaderboard.js';
 import { Economy, money } from './gameplay/economy.js';
+import { normalizeCustom } from './config/parts.js';
+import { LIVE_KEYS } from './garage/garageScene.js';
+import { ratings, effectivePhys } from './vehicles/upgrades.js';
 import { HUD } from './ui/hud.js';
 import { PLAYER_CARS, CAR_BY_ID } from './config/cars.js';
 import { ENVIRONMENTS, TIMES, DENSITIES } from './config/environments.js';
@@ -201,32 +204,34 @@ export class Game {
   }
 
   getCustom(id) {
-    if (!this.save.customs[id]) this.save.customs[id] = { ...CAR_BY_ID[id].defaults };
+    const cu = this.save.customs[id];
+    // every car's customisation is kept complete (factory values filled in, older formats converted)
+    if (!cu || !cu._n) this.save.customs[id] = { ...normalizeCustom(CAR_BY_ID[id], cu || CAR_BY_ID[id].defaults), _n: 1 };
     return this.save.customs[id];
   }
 
-  setCustom(id, cu, rebuild) {
+  setCustom(id, cu) {
     this.save.customs[id] = cu;
     this.saveNow();
-    if (this.garage.def?.id === id) {
-      if (rebuild) { this.garage.show(CAR_BY_ID[id], cu, this.S.plate); this._garageCustomKey = JSON.stringify(cu) + this.S.plate; }
-      else {
-        this.garage.car.mats.paint.color.set(cu.color);
-      }
-    }
-    if (id === this.save.selectedCar) this.carDirty = true;
-    if (id === this.save.selectedCar && rebuild) this.audioDirty = true;
+    if (this.garage.def?.id === id) this.previewCustom(id, cu);
+    if (id === this.save.selectedCar) { this.carDirty = true; this.audioDirty = true; }
   }
 
   showGarageCar(id) { this.previewCustom(id, this.getCustom(id)); }
 
-  /** Show a car in the garage with a given set of parts (a try-before-you-buy preview when not yet saved). */
+  /**
+   * Show a car in the garage with a given set of parts (a try-before-you-buy preview when not yet saved).
+   * Only changes to its shape rebuild it; colours, finishes, tint and stance are applied to the built car.
+   */
   previewCustom(id, cu) {
-    const key = JSON.stringify(cu) + this.S.plate;
+    const geo = {};
+    for (const [k, v] of Object.entries(cu)) if (!LIVE_KEYS.has(k)) geo[k] = v;
+    const key = id + JSON.stringify(geo) + this.S.plate;
     if (this.garage.def?.id !== id || this._garageCustomKey !== key) {
-      this.garage.show(CAR_BY_ID[id], cu, this.S.plate);
+      this.garage.show(CAR_BY_ID[id], cu, cu.plate || this.S.plate);
       this._garageCustomKey = key;
     }
+    this.garage.live(cu);
   }
 
   onCarChanged() {
@@ -242,20 +247,32 @@ export class Game {
     this.revT = 0;
   }
 
-  carStats(def) {
-    this._stats = this._stats || {};
-    if (this._stats[def.id]) return this._stats[def.id];
-    const p = new VehiclePhysics(def, def.defaults);
+  /** 0-60 time from the physics model for a customisation (cached). */
+  zeroSixty(def, custom) {
+    this._z60 = this._z60 || new Map();
+    const key = def.id + JSON.stringify(custom || null);
+    if (this._z60.has(key)) return this._z60.get(key);
+    const p = new VehiclePhysics(def, custom || def.defaults);
     p.reset(0, 0, 0, 0);
     let t = 0;
     const inp = { throttle: 1, brake: 0, steer: 0, handbrake: 0, auto: true, tc: true, assist: false, sens: 1, gripMul: 1 };
     while (t < 15 && p.speed < 26.82) { p.step(1 / 120, inp); t += 1 / 120; }
-    const ph = def.phys;
-    const handling = clamp(ph.grip * 7.2 - (ph.mass - 1300) / 380 + ph.downforce * 1.3 + (ph.tireB - 14) * 0.22, 1, 10);
-    const braking = clamp(ph.brakeG * 6.6 - (ph.mass - 1400) / 520, 1, 10);
-    const st = { topSpeed: ph.topSpeed, zeroSixty: t, hp: ph.hp, mass: ph.mass, handling, braking };
-    this._stats[def.id] = st;
-    return st;
+    if (this._z60.size > 400) this._z60.clear();
+    this._z60.set(key, t);
+    return t;
+  }
+
+  /** Ratings (0-10 bars, PI class, raw figures) for a car with a given customisation. */
+  ratings(def, custom) {
+    return ratings(def, custom || def.defaults, () => this.zeroSixty(def, custom));
+  }
+
+  carStats(def, custom) {
+    const r = this.ratings(def, custom || this.save.customs[def.id] || def.defaults);
+    const ep = effectivePhys(def, custom || this.save.customs[def.id] || def.defaults);
+    const handling = clamp(ep.grip * 7.2 - (ep.mass - 1300) / 380 + ep.downforce * 1.3 + (ep.tireB - 14) * 0.22, 1, 10);
+    const braking = clamp(ep.brakeG * 6.6 - (ep.mass - 1400) / 520, 1, 10);
+    return { topSpeed: ep.topSpeed, zeroSixty: r.zeroSixty, hp: Math.round(ep.hp), mass: Math.round(ep.mass), handling, braking, pi: r.pi, cls: r.cls };
   }
 
   get carDef() { return CAR_BY_ID[this.save.selectedCar] || PLAYER_CARS[0]; }
@@ -567,6 +584,9 @@ export class Game {
     } else if (st === 'paused') {
       if (I.take('pause') || I.take('back')) this.resume();
       this._menuNav();
+    } else if ((st === 'menu' || st === 'garage') && this.ui.screen === 'custom') {
+      // the customisation screen has its own navigation (lists, sliders, categories, purchases)
+      this.ui.cz.input(I);
     } else if (st === 'menu' || st === 'garage' || st === 'results') {
       if (I.take('pause') || I.take('back')) {
         const sc = this.ui.screen;
@@ -1120,9 +1140,13 @@ export class Game {
         areas.push([l.right, 0, r.left, H]); // between the list and the info panel
         areas.push([l.right, r.bottom + 20, W, H]); // under the info panel
       } else {
-        const r = document.querySelector('#s-custom .custom-panel').getBoundingClientRect();
-        areas.push([0, 0, r.left, H]);
-        areas.push([0, r.bottom + 20, W, H]);
+        // between the item list and the item card, under the header and category tabs
+        const l = document.getElementById('cz-list').getBoundingClientRect();
+        const r = document.getElementById('cz-card').getBoundingClientRect();
+        const top = document.getElementById('cz-cats').getBoundingClientRect().bottom;
+        const bot = document.getElementById('cz-hints').getBoundingClientRect().top;
+        areas.push([l.right, top, r.left, bot]);
+        areas.push([0, Math.max(l.bottom, r.bottom) + 10, W, bot]);
       }
       let best = null;
       for (const [x0, y0, x1, y1] of areas) {
@@ -1134,6 +1158,7 @@ export class Game {
       this._gfit = { screen: this.ui.screen, ...(best || { fit: 1, offset: 0, offsetY: 0 }) };
     }
     g.update(dt, this._gfit.offset, this._gfit.fit, this._gfit.offsetY);
+    if (this.ui.screen === 'custom') this.ui.cz.update(dt);
     if (this.revT >= 0 && this.audio.ready) {
       this.revT += dt;
       const t = this.revT;

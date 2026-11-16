@@ -566,6 +566,36 @@ export function plateTexture(text, style = 'ca') {
     ctx.fillStyle = '#f2c230';
     ctx.fillRect(0, 0, 256, 128);
     ctx.fillStyle = '#111';
+  } else if (style === 'eu') {
+    ctx.fillStyle = '#f4f4f2';
+    ctx.fillRect(0, 0, 256, 128);
+    ctx.fillStyle = '#1d3f9e';
+    ctx.fillRect(0, 0, 36, 128);
+    ctx.strokeStyle = '#ffcc00';
+    ctx.lineWidth = 2;
+    for (let i = 0; i < 12; i++) { const a = (i / 12) * Math.PI * 2; ctx.beginPath(); ctx.arc(18 + Math.cos(a) * 11, 44 + Math.sin(a) * 11, 1.6, 0, Math.PI * 2); ctx.stroke(); }
+    ctx.fillStyle = '#fff';
+    ctx.font = 'bold 22px Arial, sans-serif';
+    ctx.textAlign = 'center';
+    ctx.fillText('D', 18, 100);
+    ctx.strokeStyle = '#111';
+    ctx.lineWidth = 3;
+    ctx.strokeRect(2, 2, 252, 124);
+    ctx.fillStyle = '#111';
+  } else if (style === 'black') {
+    ctx.fillStyle = '#0c0c0e';
+    ctx.fillRect(0, 0, 256, 128);
+    ctx.strokeStyle = '#c9ccd0';
+    ctx.lineWidth = 3;
+    ctx.strokeRect(6, 6, 244, 116);
+    ctx.fillStyle = '#d9dcdf';
+  } else if (style === 'race') {
+    ctx.fillStyle = '#f4f4f2';
+    ctx.fillRect(0, 0, 256, 128);
+    ctx.fillStyle = '#d0102a';
+    ctx.fillRect(0, 0, 256, 18);
+    ctx.fillRect(0, 110, 256, 18);
+    ctx.fillStyle = '#111';
   } else {
     ctx.fillStyle = '#f4f4f2';
     ctx.fillRect(0, 0, 256, 128);
@@ -578,8 +608,25 @@ export function plateTexture(text, style = 'ca') {
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
   ctx.font = 'bold 60px "Barlow Condensed", "Arial Narrow", Arial, sans-serif';
-  ctx.fillText(text, 128, style === 'ca' ? 80 : 68);
+  ctx.fillText(text, style === 'eu' ? 146 : 128, style === 'ca' || !style ? 80 : 68);
   return finish(c, { repeat: false });
+}
+
+let _glow = null;
+/** Soft radial glow (underglow on the ground). */
+export function glowTexture() {
+  if (_glow) return _glow;
+  const c = canvas(256, 256);
+  const x = c.getContext('2d');
+  const g = x.createRadialGradient(128, 128, 10, 128, 128, 128);
+  g.addColorStop(0, 'rgba(255,255,255,1)');
+  g.addColorStop(0.45, 'rgba(255,255,255,0.55)');
+  g.addColorStop(1, 'rgba(255,255,255,0)');
+  x.fillStyle = g;
+  x.fillRect(0, 0, 256, 256);
+  _glow = finish(c, { repeat: false });
+  _glow.userData.shared = true;
+  return _glow;
 }
 
 /** Distant skyline: R = silhouette alpha, G = lit-window mask. */
@@ -834,7 +881,79 @@ export function grilleMeshTexture() {
 
 /** Tyre: sidewall lettering and tread grooves laid out on the lathe UVs (u around, v across the profile). */
 let _tire = null;
-export function tireTexture() {
+const _tires = {};
+/**
+ * Tyre texture for a compound (street / sport / semi / track / drift / drag) and sidewall lettering
+ * (grey moulded, none, white, yellow, red). Cached per combination.
+ */
+export function tireTexture(type = 'street', letter = 'grey') {
+  const key = type + '|' + letter;
+  if (_tires[key]) return _tires[key];
+  if (type === 'street' && letter === 'grey') return (_tires[key] = baseTireTexture());
+  const W = 2048, H = 256;
+  const c = canvas(W, H);
+  const x = c.getContext('2d');
+  x.fillStyle = '#1c1c1d';
+  x.fillRect(0, 0, W, H);
+  const band = (v0, v1) => [(1 - v1) * H, (1 - v0) * H];
+  const [t0, t1] = band(3 / 7, 4 / 7);
+  const th = t1 - t0;
+  if (type === 'track') {
+    // slick: a smooth, slightly scuffed surface
+    x.fillStyle = '#191919';
+    x.fillRect(0, t0, W, th);
+    x.fillStyle = 'rgba(255,255,255,0.03)';
+    for (let i = 0; i < 400; i++) x.fillRect(Math.random() * W, t0 + Math.random() * th, 6 + Math.random() * 20, 1);
+  } else if (type === 'semi') {
+    // two shallow grooves and a few slashes
+    x.fillStyle = '#121213';
+    for (const f of [0.38, 0.62]) x.fillRect(0, t0 + th * f - 2, W, 4);
+    x.strokeStyle = '#141415';
+    x.lineWidth = 3;
+    for (let i = 0; i < 48; i++) { const px = (i / 48) * W; x.beginPath(); x.moveTo(px, t0 + th * 0.05); x.lineTo(px + 22, t0 + th * 0.28); x.stroke(); x.beginPath(); x.moveTo(px, t1 - th * 0.05); x.lineTo(px + 22, t1 - th * 0.28); x.stroke(); }
+  } else if (type === 'drift') {
+    // chunky shoulder blocks
+    x.fillStyle = '#0f0f10';
+    x.fillRect(0, t0 + th * 0.5 - 2, W, 4);
+    for (let i = 0; i < 64; i++) { const px = (i / 64) * W; x.fillRect(px, t0, 8, th * 0.3); x.fillRect(px + 16, t1 - th * 0.3, 8, th * 0.3); }
+  } else if (type === 'drag') {
+    // smooth drag radial with a single centre groove
+    x.fillStyle = '#161617';
+    x.fillRect(0, t0, W, th);
+    x.fillStyle = '#0f0f10';
+    x.fillRect(0, t0 + th * 0.5 - 1.5, W, 3);
+  } else {
+    // street / sport: grooves and sipes (sport has fewer, wider ribs)
+    x.fillStyle = '#0f0f10';
+    for (const f of type === 'sport' ? [0.32, 0.68] : [0.3, 0.5, 0.7]) x.fillRect(0, t0 + th * f - 1.5, W, 3);
+    x.strokeStyle = '#121213';
+    x.lineWidth = 3;
+    for (let i = 0; i < (type === 'sport' ? 72 : 96); i++) { const px = (i / 96) * W; x.beginPath(); x.moveTo(px, t0 + th * 0.02); x.lineTo(px + 14, t0 + th * 0.3); x.stroke(); x.beginPath(); x.moveTo(px, t1 - th * 0.02); x.lineTo(px + 14, t1 - th * 0.3); x.stroke(); }
+  }
+  // sidewall lettering
+  const [s0, s1] = band(6 / 7, 7 / 7);
+  const col = { grey: '#4e4f52', white: '#ececec', yellow: '#f2c230', red: '#d8203a' }[letter];
+  if (col) {
+    const name = { street: 'TOURING', sport: 'PERFORMANCE', semi: 'R-COMPOUND', track: 'RACING SLICK', drift: 'DRIFT SPEC', drag: 'DRAG RADIAL' }[type] || 'PERFORMANCE';
+    x.save();
+    x.fillStyle = col;
+    x.textBaseline = 'middle';
+    for (const off of [0, W / 2]) {
+      x.save(); x.translate(off + 120, (s0 + s1) / 2); x.scale(2.6, -1); x.font = 'bold 24px Arial, sans-serif'; x.fillText('NO HESI', 0, 0); x.restore();
+      x.save(); x.translate(off + 620, (s0 + s1) / 2); x.scale(1.6, -1); x.font = '600 18px Arial, sans-serif'; x.fillText(name, 0, 0); x.restore();
+    }
+    x.restore();
+  }
+  x.fillStyle = '#242426';
+  x.fillRect(0, s0 + 1, W, 2);
+  const t = finish(c, { srgb: true, repeat: false, aniso: true });
+  t.wrapS = THREE.RepeatWrapping;
+  t.userData.shared = true;
+  _tires[key] = t;
+  return t;
+}
+
+function baseTireTexture() {
   if (_tire) return _tire;
   const W = 2048, H = 256;
   const c = canvas(W, H);
@@ -888,5 +1007,6 @@ export function tireTexture() {
   x.fillRect(0, s0 + 1, W, 2);
   _tire = finish(c, { srgb: true, repeat: false, aniso: true });
   _tire.wrapS = THREE.RepeatWrapping;
+  _tire.userData.shared = true;
   return _tire;
 }

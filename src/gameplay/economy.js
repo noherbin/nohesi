@@ -6,24 +6,13 @@
 // - Parts are bought per car and stay owned once bought (you can swap freely between parts you own). A car's
 //   factory parts come with it. Colours (paint, rims, calipers), window tint and the plate are free.
 import { PLAYER_CARS, CAR_BY_ID } from '../config/cars.js';
+import { GROUP_BY_KEY, itemOf, factoryCustom, normalizeCustom } from '../config/parts.js';
 
 export const START_CASH = 5000;
 export const DISTANCE_PAY = 0.2; // $ per metre driven in a scoring run
 
-/** Price tables keyed by the customisation field they apply to. */
-export const PART_PRICES = {
-  wheels: {
-    five: 1500, split: 2500, multi: 2500, steelie: 1200, aero: 3000, turbine: 3000, yspoke: 3000, vspoke: 3500,
-    mesh: 3500, rs8: 4500, gt: 4500, six: 5000, fan: 5500, deep: 6000, blade: 6500, center: 7500,
-    dish5: 8500, dish3: 9500, sdish: 12000,
-  },
-  kit: { stock: 0, street: 5000, aggressive: 11000, wide: 20000, rivet: 32000, outlaw: 48000 },
-  spoiler: { none: 0, lip: 2000, duck: 4500, wing: 6000, gt: 12000 },
-  suspension: { stock: 0, lowered: 3500, slammed: 7500 },
-  exhaust: { stock: 0, sport: 4000, straight: 8000 },
-  finish: { gloss: 0, metallic: 1500, pearl: 3000, matte: 3500, chrome: 15000 },
-};
-export const PRICED = Object.keys(PART_PRICES);
+// Part prices live in the customisation catalogue (config/parts.js).
+export const PRICED = Object.entries(GROUP_BY_KEY).filter(([, g]) => g.type === 'part').map(([k]) => k);
 
 export const money = (n) => `$${Math.round(n).toLocaleString('en-US')}`;
 
@@ -40,16 +29,44 @@ export class Economy {
   /** Saves from before money existed: keep every car already unlocked and every part already fitted. */
   _migrate() {
     const s = this.save;
-    if (s.econ === 1) return;
+    if (s.econ === 1) this._migrateParts();
+    if (s.econ >= 2) return;
+    if (s.econ === 1) { s.econ = 2; this.game.saveNow(); return; }
     s.econ = 1;
     s.owned = PLAYER_CARS.filter((c) => c.cost > 0 && c.cost <= (s.career || 0)).map((c) => c.id);
     s.parts = {};
     for (const [id, cu] of Object.entries(s.customs || {})) {
       if (!CAR_BY_ID[id]) continue;
-      for (const k of PRICED) if (cu[k] !== undefined) this._grant(id, k, cu[k]);
+      const n = normalizeCustom(CAR_BY_ID[id], cu);
+      for (const k of PRICED) if (n[k] !== undefined) this._grant(id, k, n[k]);
     }
     s.cash = Math.max(s.cash || 0, START_CASH * 2);
+    s.econ = 2;
+    this._migrateParts(true);
     this.game.saveNow();
+  }
+
+  /** Parts bought under the old single-slot kits / spoilers / suspension become the matching new parts. */
+  _migrateParts(force = false) {
+    const s = this.save;
+    if (!force && s.econ !== 1) return;
+    for (const [id, list] of Object.entries(s.parts || {})) {
+      const def = CAR_BY_ID[id];
+      if (!def) continue;
+      const out = new Set();
+      for (const e of list) {
+        const [k, v] = e.split(':');
+        if (k === 'kit') {
+          const n = normalizeCustom(def, { kit: v });
+          for (const kk of ['splitter', 'skirts', 'diffuser', 'fBumper', 'fenders']) if (n[kk] && n[kk] !== 'none' && n[kk] !== 'stock') out.add(`${kk}:${n[kk]}`);
+        } else if (k === 'spoiler' && (v === 'wing' || v === 'gt')) out.add(`wing:${v}`);
+        else if (k === 'suspension') out.add(`springs:${v === 'slammed' ? 'sport' : 'street'}`);
+        else out.add(e);
+      }
+      s.parts[id] = [...out];
+    }
+    // customisations saved in the old format are converted to the new slots too
+    for (const [id, cu] of Object.entries(s.customs || {})) if (CAR_BY_ID[id]) s.customs[id] = normalizeCustom(CAR_BY_ID[id], cu);
   }
 
   /* ------------------------------------------------------------ cars */
@@ -70,13 +87,22 @@ export class Economy {
   }
 
   /* ------------------------------------------------------------ parts */
-  price(key, val) { return PART_PRICES[key]?.[val] ?? 0; }
+  price(key, val) { return itemOf(key, val)?.price ?? 0; }
 
   ownsPart(id, key, val) {
     if (!PRICED.includes(key) || this.sandbox) return true;
     if (this.price(key, val) === 0) return true;
-    if (CAR_BY_ID[id]?.defaults?.[key] === val) return true; // factory part
+    const def = CAR_BY_ID[id];
+    if (def && String(factoryCustom(def)[key]) === String(val)) return true; // factory part
     return (this.save.parts?.[id] || []).includes(`${key}:${val}`);
+  }
+
+  /** Pay for something that is bought each time (a respray, a plate, a tint film). */
+  spend(n) {
+    if (!this.canAfford(n)) return false;
+    if (!this.sandbox) this.save.cash -= n;
+    this.game.saveNow();
+    return true;
   }
 
   _grant(id, key, val) {
