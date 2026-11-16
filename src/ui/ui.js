@@ -443,11 +443,10 @@ export class UI {
     if (this.lbScope === 'global') {
       note = `${what}, one entry per driver. Your personal bests post here automatically.`;
       if (L.status === 'readonly') note = `${what}, one entry per driver. You can view the global board, but runs from this account stay on this device.`;
-      if (L.status === 'ready' && !L.name) note += ' Set a driver name — until you do, your Claude name is shown.';
+      if (L.status === 'ready' && !L.name) note += L.be?.kind === 'artifact' ? ' Set a driver name — until you do, your Claude name is shown.' : ' Set a driver name so everyone can see who you are.';
     } else {
       note = `${what} — the top 10 runs on this device.`;
-      if (L.status === 'off') note += ' A shared global board appears when the game is played on claude.ai.';
-      if (L.status === 'error') note += ' The global board could not be reached right now.';
+      if (L.status === 'error') note += ' The global board can\'t be reached right now (are you offline?) — runs still count here and post when it\'s back.';
     }
     $('lb-note').textContent = note;
 

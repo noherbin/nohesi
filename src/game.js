@@ -497,6 +497,10 @@ export class Game {
       if (g[main]) bits.push(`#${g[main]} GLOBAL`);
       if (g.speed) bits.push(`TOP SPEED #${g.speed} GLOBAL`);
       if (bits.length) this.ui.toast(`LEADERBOARD · ${bits.join(' · ')}`, 'gold');
+      if ((g[main] || g.speed) && !this.leaderboard.name && !this._lbNameHint) {
+        this._lbNameHint = true;
+        this.ui.toast('Set your driver name in LEADERBOARD so everyone sees who you are');
+      }
     });
   }
 

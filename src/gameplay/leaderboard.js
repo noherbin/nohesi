@@ -4,10 +4,11 @@
 // reached in a scoring run).
 //
 // - Device board: the top 10 runs on this device, kept in the save file. Always available.
-// - Global board: when the game runs as a claude.ai artifact, each player's personal bests are stored in the
-//   artifact's shared database (one document per player, keyed by their opaque id) and everyone with access
-//   sees the same rankings. Anywhere else (GitHub Pages, a local file) the global board is simply absent.
+// - Global board: every player's personal bests in one shared, public database (see lbBackends.js), so
+//   everyone who plays (GitHub Pages, the zip, claude.ai) sees the same rankings. Without a connection the
+//   game simply shows the device board.
 import { CAR_BY_ID } from '../config/cars.js';
+import { FirebaseBackend, ArtifactBackend } from './lbBackends.js';
 
 export const BOARDS = [
   { id: 'endless', name: 'ENDLESS', field: 'endless', label: 'SCORE' },
@@ -17,23 +18,20 @@ export const BOARDS = [
 const BOARD = Object.fromEntries(BOARDS.map((b) => [b.id, b]));
 const LOCAL_MAX = 10;
 const GLOBAL_MAX = 50;
-const COLL = 'lb';
 // shared data is untrusted: ignore anything outside what the game can actually produce
 const SANE = { endless: 5e7, ta: 20000, spd: 330 };
 const NAME_MAX = 16;
 
-const timed = (p, ms = 10000) => Promise.race([p, new Promise((_, rej) => setTimeout(() => rej({ code: 'timeout' }), ms))]);
 export const cleanName = (s) => String(s || '').replace(/[\u0000-\u001f<>]/g, '').trim().toUpperCase().slice(0, NAME_MAX);
 
 export class Leaderboard {
   constructor(game) {
     this.game = game;
-    // off: no shared database here; connecting; ready: read + post; readonly: can read, cannot post; error
-    this.status = 'off';
-    this.db = null;
-    this.user = null;
-    this.uid = null;
+    // connecting; ready: read + post; readonly: can read, cannot post; error: no global board reachable
+    this.status = 'connecting';
+    this.be = null;
     this.mine = null;
+    this.mineLoaded = false;
     this.cache = {};
     this.listeners = new Set();
     this._writing = Promise.resolve();
@@ -70,30 +68,44 @@ export class Leaderboard {
   get globalAvailable() { return this.status === 'ready' || this.status === 'readonly'; }
 
   /* ------------------------------------------------------------ connection */
+  get uid() { return this.be?.uid || null; }
+
   async _init() {
-    const C = typeof window !== 'undefined' ? window.claude : null;
-    if (!C || typeof C.use !== 'function') return;
-    this.status = 'connecting';
     this._emit();
+    // the public board first; on claude.ai, if the page can't reach it, the artifact's own database
+    try {
+      const fb = new FirebaseBackend();
+      await fb.probe();
+      this.be = fb;
+      this.status = 'ready';
+    } catch (e) {
+      this.be = await this._artifactBackend();
+    }
+    if (!this.be) { this.status = 'error'; this._emit(); return; }
+    this._emit();
+    // runs set before the global board existed (or while offline) count too
+    if (this.status === 'ready') this._syncFromLocal();
+  }
+
+  async _artifactBackend() {
+    const C = typeof window !== 'undefined' ? window.claude : null;
+    if (!C || typeof C.use !== 'function') return null;
     try {
       const [db, user] = await Promise.all([C.use('db'), C.use('user')]);
-      if (!db) { this.status = 'off'; this._emit(); return; }
-      this.db = db;
-      this.user = user;
-      this.uid = user ? await user.id() : null;
+      if (!db) return null;
+      const uid = user ? await user.id() : null;
       const can = user ? await user.can('data.write') : null;
-      this.status = this.uid && can !== false ? 'ready' : 'readonly';
-      if (this.uid) {
-        const snap = await timed(db.collection(COLL).doc(this.uid).get());
-        this.mine = snap.exists ? { ...snap.data() } : null;
-      }
-      this._emit();
-      // runs set before the global board existed (or while offline) count too
-      if (this.status === 'ready') await this._syncFromLocal();
+      this.status = uid && can !== false ? 'ready' : 'readonly';
+      return new ArtifactBackend(db, user, uid);
     } catch (e) {
-      if (this.status === 'connecting') this.status = 'error';
-      this._emit();
+      return null;
     }
+  }
+
+  async _loadMine() {
+    if (this.mineLoaded) return;
+    this.mine = await this.be.getMine();
+    this.mineLoaded = true;
   }
 
   /* ------------------------------------------------------------ recording a run */
@@ -125,7 +137,8 @@ export class Leaderboard {
   /** Write the player's personal bests that improved, then work out their global rank on each. */
   _submit(items) {
     const job = this._writing.then(async () => {
-      if (this.status !== 'ready' || !this.uid) return {};
+      if (this.status !== 'ready') return {};
+      await this._loadMine();
       const doc = { ...(this.mine || {}) };
       let changed = false;
       const improved = [];
@@ -140,7 +153,7 @@ export class Leaderboard {
       if (this.name && doc.tag !== this.name) { doc.tag = this.name; changed = true; }
       if (changed) {
         doc.at = Date.now();
-        await timed(this.db.collection(COLL).doc(this.uid).set(doc));
+        await this.be.setMine(doc);
         this.mine = doc;
         for (const b of improved) delete this.cache[b];
         this._emit();
@@ -150,7 +163,8 @@ export class Leaderboard {
       for (const board of improved) ranks[board] = await this.globalRank(board, this.mine[BOARD[board].field]);
       return ranks;
     }).catch((e) => {
-      if (e?.code === 'invalid_argument') { this.status = 'readonly'; this._emit(); }
+      // signed-in posting isn't possible here (no account / sign-in refused): keep showing the board
+      if (e?.code === 'invalid_argument' || (this.be?.kind === 'firebase' && !this.uid && e?.code === 'http')) { this.status = 'readonly'; this._emit(); }
       return {};
     });
     this._writing = job;
@@ -158,6 +172,8 @@ export class Leaderboard {
   }
 
   async _syncFromLocal() {
+    // only players who have runs need an id; a stored one means they may have an entry to rename
+    if (this.uid) { try { await this._loadMine(); } catch (e) { return; } }
     const items = [];
     for (const b of BOARDS) {
       const top = this.local[b.id][0];
@@ -170,7 +186,7 @@ export class Leaderboard {
   rename() {
     clearTimeout(this._renameT);
     this._renameT = setTimeout(() => {
-      if (this.status === 'ready' && this.mine && this.mine.tag !== this.name) this._submit([]);
+      if (this.status === 'ready' && this.uid && this.mineLoaded && this.mine && this.mine.tag !== this.name) this._submit([]);
     }, 900);
   }
 
@@ -185,17 +201,15 @@ export class Leaderboard {
     const c = this.cache[board];
     if (!force && c && Date.now() - c.t < 15000) return c.rows;
     const f = BOARD[board].field;
-    const snap = await timed(this.db.collection(COLL).orderBy(f, 'desc').limit(GLOBAL_MAX).get());
-    const docs = snap.docs.filter((d) => {
-      const v = d.data()?.[f];
+    const docs = (await this.be.top(f, GLOBAL_MAX)).filter((d) => {
+      const v = d.data?.[f];
       return typeof v === 'number' && Number.isFinite(v) && v > 0 && v <= SANE[f];
     });
-    // players without a driver name show under their claude.ai name (resolved per viewer, never stored)
-    const profiles = this.user ? await this.user.profiles(docs.map((d) => d.id)) : {};
+    const names = await this.be.names(docs.map((d) => d.id));
     const rows = docs.map((d, i) => {
-      const x = d.data(), det = x[f + 'D'] || {};
-      const name = cleanName(x.tag) || profiles[d.id]?.name || 'Driver';
-      return { rank: i + 1, name, car: det.car, v: x[f], nm: det.nm, dist: det.dist, score: det.score, env: det.env, at: det.at || x.at, me: d.id === this.uid };
+      const x = d.data, det = (x[f + 'D'] && typeof x[f + 'D'] === 'object') ? x[f + 'D'] : {};
+      const name = cleanName(x.tag) || names[d.id] || `DRIVER ${String(d.id).slice(0, 4).toUpperCase()}`;
+      return { rank: i + 1, name, car: det.car, v: x[f], nm: det.nm, dist: det.dist, score: det.score, env: det.env, at: det.at || x.at, me: !!this.uid && d.id === this.uid };
     });
     this.cache[board] = { rows, t: Date.now() };
     return rows;
@@ -204,8 +218,7 @@ export class Leaderboard {
   /** 1-based global position of a value on a board. */
   async globalRank(board, v) {
     const f = BOARD[board].field;
-    const snap = await timed(this.db.collection(COLL).where(f, '>', v).limit(1000).get());
-    return snap.docs.filter((d) => (d.data()?.[f] || 0) <= SANE[f]).length + 1;
+    return (await this.be.countAbove(f, v, SANE[f])) + 1;
   }
 
   carName(id) { return CAR_BY_ID[id]?.name || '—'; }
