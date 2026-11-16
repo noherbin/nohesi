@@ -192,7 +192,9 @@ export class AudioSystem {
       else if (r <= L[1].rpm) { const k = (r - L[0].rpm) / (L[1].rpm - L[0].rpm); w[0] = Math.cos(k * Math.PI / 2); w[1] = Math.sin(k * Math.PI / 2); }
       else if (r <= L[2].rpm) { const k = (r - L[1].rpm) / (L[2].rpm - L[1].rpm); w[1] = Math.cos(k * Math.PI / 2); w[2] = Math.sin(k * Math.PI / 2); }
       else w[2] = 1;
-      const loadGain = lerp(0.42, 1.0, st.load);
+      // an electric motor is silent at rest and only sings under load / with speed
+      const ev = !!this.car?.engine.electric;
+      const loadGain = ev ? (0.12 + 0.6 * st.load) * clamp(st.rpm / 2200, 0, 1) : lerp(0.42, 1.0, st.load);
       const limiterDip = s.limiter ? 0.55 : 1;
       for (let i = 0; i < 3; i++) {
         L[i].src.playbackRate.setTargetAtTime(clamp(r / L[i].rpm, 0.25, 3.5), t, 0.015);
@@ -204,7 +206,7 @@ export class AudioSystem {
     this.engTone.frequency.setTargetAtTime(interior ? bright * 0.4 : bright, t, tc);
     // intake roar
     this.intake.f.frequency.setTargetAtTime(500 + rf * 1600, t, tc);
-    this.intake.g.gain.setTargetAtTime(active * st.load * rf * 0.12, t, tc);
+    this.intake.g.gain.setTargetAtTime(this.car?.engine.electric ? 0 : active * st.load * rf * 0.12, t, tc);
     // turbo
     const turbo = this.car?.engine.turbo ? s.boost : 0;
     this.turboOsc.frequency.setTargetAtTime(1800 + turbo * 5200 * (0.6 + rf * 0.4), t, 0.05);

@@ -25,7 +25,7 @@ export function dial(c, x, y, r, value, o) {
   if (o.red) {
     c.strokeStyle = o.redColor || '#e8222e';
     c.lineWidth = r * 0.07;
-    c.beginPath(); c.arc(x, y, r * 0.86, ang(o.red / o.max, a0, a1), a1); c.stroke();
+    c.beginPath(); c.arc(x, y, r * 0.86, ang(o.red / o.max, a0, a1), a1, a1 < a0); c.stroke();
   }
   // ticks
   const nMaj = Math.round(o.max / o.step);
@@ -324,12 +324,172 @@ function pod(c, W, H, s, G) {
   telltales(c, W, H, s, 108, 0.42);
 }
 
-const LAYOUTS = { twinAnalog, digitalSport, retroAnalog, curvedPanel, fiveDial, twinTunnel, hexTFT, pod };
+// 80s digital dash: segmented bar-graph tachometer, seven-segment speed, bar-graph fuel and temperature
+function seg7(c, txt, x, y, h, col) {
+  // simple seven-segment digits (right aligned at x)
+  const SEG = { 0: 'abcfed', 1: 'bc', 2: 'abged', 3: 'abgcd', 4: 'fgbc', 5: 'afgcd', 6: 'afgedc', 7: 'abc', 8: 'abcdefg', 9: 'abcdfg', '-': 'g' };
+  const w = h * 0.52, t = h * 0.11, gap = h * 0.18;
+  let cx = x;
+  for (const ch of String(txt).split('').reverse()) {
+    const on = SEG[ch] || '';
+    const x0 = cx - w;
+    const segs = { a: [x0 + t, y, w - 2 * t, t], d: [x0 + t, y + h - t, w - 2 * t, t], g: [x0 + t, y + h / 2 - t / 2, w - 2 * t, t],
+      f: [x0, y + t, t, h / 2 - t], b: [cx - t, y + t, t, h / 2 - t], e: [x0, y + h / 2, t, h / 2 - t], c: [cx - t, y + h / 2, t, h / 2 - t] };
+    for (const [k, r] of Object.entries(segs)) { c.fillStyle = on.includes(k) ? col : 'rgba(255,170,40,0.06)'; c.fillRect(...r); }
+    cx -= w + gap;
+  }
+}
+function digital80(c, W, H, s, G) {
+  c.fillStyle = '#050403'; c.fillRect(0, 0, W, H);
+  const n = needles(s);
+  const N = 40, f = n.rpm / s.maxR;
+  for (let i = 0; i < N; i++) {
+    const on = i / N < f, red = (i / N) * s.maxR >= s.red;
+    const h = 30 + i * 2.2;
+    c.fillStyle = on ? (red ? '#ff3b20' : i > N * 0.6 ? '#ffd21e' : '#58ff6a') : 'rgba(90,255,110,0.06)';
+    c.fillRect(70 + i * 22, 150 - h, 16, h);
+  }
+  c.fillStyle = '#ffae2a'; c.font = `600 18px ${FONT}`; c.textAlign = 'center'; c.textBaseline = 'middle';
+  for (let k = 0; k <= s.maxR / 1000; k++) c.fillText(String(k), 70 + (k * 1000 / s.maxR) * N * 22, 170);
+  c.fillText('x1000 RPM', 950, 30);
+  seg7(c, String(Math.round(n.spd)), 640, 196, 120, '#ffae2a');
+  c.fillStyle = '#ffae2a'; c.font = `700 26px ${FONT}`; c.textAlign = 'left'; c.fillText(s.units === 'kmh' ? 'km/h' : 'MPH', 652, 300);
+  // bar-graph fuel / temp
+  for (const [x0, lab, v] of [[80, 'FUEL', n.f ?? 0.7], [190, 'TEMP', n.f ?? 0.5]]) {
+    for (let i = 0; i < 10; i++) { c.fillStyle = i / 10 < v ? '#58ff6a' : 'rgba(90,255,110,0.07)'; c.fillRect(x0, 310 - i * 13, 70, 9); }
+    c.fillStyle = '#ffae2a'; c.font = `600 18px ${FONT}`; c.textAlign = 'center'; c.fillText(lab, x0 + 35, 340);
+  }
+  c.fillStyle = '#58ff6a'; c.font = `700 70px ${FONT}`; c.textAlign = 'center'; c.fillText(gearText(s), 860, 260);
+  c.fillStyle = '#ffae2a'; c.font = `600 18px ${FONT}`; c.fillText(clock(s), 860, 330);
+  telltales(c, W, H, s, 352, 0.18);
+}
+
+// 90s Japanese GT: speedo left, big tach in the middle, boost gauge right with its own small oil dial
+function gtrTriple(c, W, H, s, G) {
+  c.fillStyle = '#000'; c.fillRect(0, 0, W, H);
+  const n = needles(s);
+  dial(c, 190, 220, 150, n.spd, { max: s.maxS, step: s.maxS > 200 ? 40 : 20, minor: 2, ...G, label: s.units === 'kmh' ? 'km/h' : 'MPH' });
+  dial(c, 512, 196, 184, n.rpm, { max: s.maxR, step: 1000, labelDiv: 1000, red: s.red, ...G, label: 'x1000 r/min', digital: gearText(s), digitalColor: G.mfd });
+  const bv = n.f !== null ? n.f * 2.5 : 1 + s.boost * 1.2 * (s.thr > 0.5 ? 1 : 0.2);
+  dial(c, 836, 160, 104, bv, { max: 2.5, step: 0.5, minor: 2, labelDiv: 1, ...G, small: true, red: 2.1, label: 'BOOST x100kPa' });
+  dial(c, 900, 318, 58, n.f ?? 0.6, { max: 1, step: 0.5, minor: 2, ...G, small: true, a0: Math.PI * 1.15, a1: Math.PI * 1.85, label: 'OIL' });
+  c.fillStyle = G.mfd; c.font = `600 18px ${FONT}`; c.textAlign = 'center';
+  c.fillText(`${Math.floor(s.units === 'kmh' ? s.odo : s.odo * 0.6214).toString().padStart(6, '0')}`, 190, 338);
+  telltales(c, W, H, s, 30, 0.3);
+}
+
+// British GT: chrome-ringed speedo and a counter-rotating tachometer with a TFT strip between them
+function twinCounter(c, W, H, s, G) {
+  const bg = c.createLinearGradient(0, 0, 0, H); bg.addColorStop(0, '#0b0c0d'); bg.addColorStop(1, '#030303');
+  c.fillStyle = bg; c.fillRect(0, 0, W, H);
+  const n = needles(s);
+  for (const x of [222, 802]) { c.strokeStyle = '#c9ccd0'; c.lineWidth = 7; c.beginPath(); c.arc(x, 196, 176, 0, Math.PI * 2); c.stroke(); }
+  dial(c, 222, 196, 170, n.spd, { max: s.maxS, step: s.maxS > 200 ? 40 : 20, minor: 2, ...G, label: s.units === 'kmh' ? 'km/h' : 'MPH' });
+  // tachometer sweeps the other way, as on the real thing
+  dial(c, 802, 196, 170, n.rpm, { max: s.maxR, step: 1000, labelDiv: 1000, red: s.red, ...G, a0: Math.PI * 2.25, a1: Math.PI * 0.75, label: 'RPM x1000' });
+  c.fillStyle = '#060708'; c.fillRect(424, 92, 176, 210);
+  c.strokeStyle = 'rgba(201,204,208,0.5)'; c.lineWidth = 2; c.strokeRect(424, 92, 176, 210);
+  c.fillStyle = '#ffffff'; c.font = `700 92px ${FONT}`; c.textAlign = 'center'; c.textBaseline = 'middle';
+  c.fillText(gearText(s), 512, 168);
+  c.fillStyle = G.mfd; c.font = `600 20px ${FONT}`; c.fillText(s.manual ? 'MANUAL' : 'GT  SPORT', 512, 234);
+  c.fillStyle = 'rgba(255,255,255,0.6)'; c.fillText(clock(s), 512, 272);
+  telltales(c, W, H, s, 40, 0.11);
+}
+
+// Electric: slim wide display, power / regen meter on the left, speed in the middle, battery and range right
+function evStrip(c, W, H, s, G) {
+  const bg = c.createLinearGradient(0, 0, W, 0); bg.addColorStop(0, '#05070a'); bg.addColorStop(0.5, '#0a0f16'); bg.addColorStop(1, '#05070a');
+  c.fillStyle = bg; c.fillRect(0, 0, W, H);
+  const n = needles(s);
+  const pw = n.f !== null ? n.f : clamp(s.thr * (0.35 + 0.65 * Math.min(1, s.speed / 60)), 0, 1);
+  const regen = n.f !== null ? 0 : clamp(-s.ax / 6, 0, 1) * (s.thr < 0.05 ? 1 : 0);
+  const cx = 240, cy = 214, r = 150, a0 = Math.PI * 0.8, a1 = Math.PI * 2.2, am = a0 + (a1 - a0) * 0.25;
+  c.lineWidth = 16; c.strokeStyle = 'rgba(160,200,255,0.1)'; c.beginPath(); c.arc(cx, cy, r, a0, a1); c.stroke();
+  c.strokeStyle = G.ring; c.beginPath(); c.arc(cx, cy, r, am, am + (a1 - am) * pw); c.stroke();
+  c.strokeStyle = '#2bff8a'; c.beginPath(); c.arc(cx, cy, r, am - (am - a0) * regen, am); c.stroke();
+  c.fillStyle = '#e8f2ff'; c.font = `700 64px ${FONT}`; c.textAlign = 'center'; c.textBaseline = 'middle';
+  c.fillText(`${Math.round(pw * 100)}`, cx, cy - 6);
+  c.fillStyle = 'rgba(200,220,255,0.6)'; c.font = `600 20px ${FONT}`; c.fillText('% POWER', cx, cy + 40);
+  c.fillStyle = '#ffffff'; c.font = `300 150px ${FONT}`; c.fillText(String(Math.round(n.spd)), 540, 190);
+  c.fillStyle = 'rgba(200,220,255,0.6)'; c.font = `600 24px ${FONT}`; c.fillText(s.units === 'kmh' ? 'km/h' : 'mph', 540, 282);
+  c.fillStyle = G.ring; c.font = `700 30px ${FONT}`; c.fillText(s.gear === -1 ? 'R' : 'D', 540, 330);
+  // battery
+  const soc = 0.78 - (s.odo % 400) / 4000;
+  c.strokeStyle = 'rgba(220,235,255,0.7)'; c.lineWidth = 3; c.strokeRect(790, 120, 150, 54); c.fillRect(940, 136, 8, 22);
+  c.fillStyle = '#2bff8a'; c.fillRect(796, 126, 138 * soc, 42);
+  c.fillStyle = '#e8f2ff'; c.font = `600 26px ${FONT}`; c.fillText(`${Math.round(soc * 100)}%   ${Math.round(soc * (s.units === 'kmh' ? 450 : 280))} ${s.units === 'kmh' ? 'km' : 'mi'}`, 865, 216);
+  c.fillStyle = 'rgba(200,220,255,0.6)'; c.font = `600 20px ${FONT}`; c.fillText(clock(s), 865, 270);
+  telltales(c, W, H, s, 40, 0.2);
+}
+
+// Full digital cockpit: two small dials and a wide navigation map between them
+function virtualCockpit(c, W, H, s, G) {
+  c.fillStyle = '#020304'; c.fillRect(0, 0, W, H);
+  const n = needles(s);
+  // map
+  const mx0 = 300, mx1 = 724;
+  const mg = c.createLinearGradient(0, 0, 0, H); mg.addColorStop(0, '#0c1410'); mg.addColorStop(1, '#16221a');
+  c.fillStyle = mg; c.fillRect(mx0, 40, mx1 - mx0, 300);
+  c.strokeStyle = 'rgba(160,200,170,0.18)'; c.lineWidth = 3;
+  for (let k = 0; k < 7; k++) { c.beginPath(); c.moveTo(mx0, 60 + k * 45 + (s.odo * 40) % 45); c.lineTo(mx1, 30 + k * 45 + (s.odo * 40) % 45); c.stroke(); }
+  c.strokeStyle = '#e6e9ee'; c.lineWidth = 16; c.beginPath(); c.moveTo(512, 340); c.quadraticCurveTo(512, 200, 560, 40); c.stroke();
+  c.strokeStyle = '#3d8bff'; c.lineWidth = 7; c.beginPath(); c.moveTo(512, 340); c.quadraticCurveTo(512, 200, 560, 40); c.stroke();
+  c.fillStyle = '#ffffff'; c.beginPath(); c.moveTo(512, 262); c.lineTo(530, 300); c.lineTo(512, 290); c.lineTo(494, 300); c.closePath(); c.fill();
+  // dials either side
+  const small = { ...G, a0: Math.PI * 0.75, a1: Math.PI * 2.25 };
+  dial(c, 160, 200, 140, n.spd, { max: s.maxS, step: s.maxS > 200 ? 40 : 20, minor: 2, labelEvery: 2, ...small, label: s.units === 'kmh' ? 'km/h' : 'mph', digital: String(Math.round(n.spd)) });
+  dial(c, 864, 200, 140, n.rpm, { max: s.maxR, step: 1000, labelDiv: 1000, red: s.red, ...small, label: 'x1000 rpm', digital: gearText(s), digitalColor: G.mfd });
+  c.fillStyle = 'rgba(255,255,255,0.7)'; c.font = `600 20px ${FONT}`; c.textAlign = 'center'; c.fillText(`${clock(s)}   ·   A9 Exit 14`, 512, 362);
+  telltales(c, W, H, s, 24, 0.12);
+}
+
+// Fighter-jet style (V12 supercar): speed tape on the left, central tach with a big gear, G-meter right
+function jetTFT(c, W, H, s, G) {
+  c.fillStyle = '#020202'; c.fillRect(0, 0, W, H);
+  const n = needles(s);
+  // speed tape
+  c.fillStyle = '#0b0c0c'; c.fillRect(70, 30, 150, 320);
+  c.strokeStyle = G.ring; c.lineWidth = 2; c.strokeRect(70, 30, 150, 320);
+  c.save(); c.beginPath(); c.rect(70, 30, 150, 320); c.clip();
+  const sp = n.spd;
+  c.fillStyle = 'rgba(255,255,255,0.75)'; c.font = `600 20px ${FONT}`; c.textAlign = 'right'; c.textBaseline = 'middle';
+  for (let v = Math.floor(sp / 10) * 10 - 60; v <= sp + 60; v += 10) {
+    if (v < 0) continue;
+    const y = 190 - (v - sp) * 2.6;
+    c.fillRect(180, y - 1, v % 20 === 0 ? 30 : 16, 2);
+    if (v % 20 === 0) c.fillText(String(v), 172, y);
+  }
+  c.restore();
+  c.fillStyle = '#000'; c.fillRect(74, 168, 112, 44); c.strokeStyle = G.ring; c.strokeRect(74, 168, 112, 44);
+  c.fillStyle = '#ffffff'; c.font = `700 34px ${FONT}`; c.textAlign = 'center'; c.fillText(String(Math.round(sp)), 130, 191);
+  // central tach: angular bars
+  const cx = 512, cy = 230, r = 170;
+  const a0 = Math.PI * 0.85, a1 = Math.PI * 2.15, f = n.rpm / s.maxR;
+  for (let i = 0; i < 52; i++) {
+    const u = i / 52, a = a0 + (a1 - a0) * u;
+    const on = u < f, red = u * s.maxR >= s.red;
+    c.strokeStyle = on ? (red ? G.redline : G.ring) : 'rgba(255,255,255,0.08)';
+    c.lineWidth = 9;
+    c.beginPath(); c.moveTo(cx + Math.cos(a) * (r - 30), cy + Math.sin(a) * (r - 30)); c.lineTo(cx + Math.cos(a) * r, cy + Math.sin(a) * r); c.stroke();
+  }
+  c.fillStyle = '#ffffff'; c.font = `700 130px ${FONT}`; c.textAlign = 'center'; c.textBaseline = 'middle'; c.fillText(gearText(s), cx, cy - 10);
+  c.fillStyle = G.ring; c.font = `700 24px ${FONT}`; c.fillText('CORSA', cx, cy + 82);
+  // G-meter
+  const gx = 860, gy = 190;
+  c.strokeStyle = 'rgba(255,255,255,0.25)'; c.lineWidth = 2;
+  for (const rr of [40, 80, 120]) { c.beginPath(); c.arc(gx, gy, rr, 0, Math.PI * 2); c.stroke(); }
+  c.beginPath(); c.moveTo(gx - 130, gy); c.lineTo(gx + 130, gy); c.moveTo(gx, gy - 130); c.lineTo(gx, gy + 130); c.stroke();
+  c.fillStyle = G.ring; c.beginPath(); c.arc(gx + clamp(s.ay / 9.81, -1.5, 1.5) * 80, gy - clamp(s.ax / 9.81, -1.5, 1.5) * 80, 11, 0, Math.PI * 2); c.fill();
+  c.fillStyle = 'rgba(255,255,255,0.6)'; c.font = `600 18px ${FONT}`; c.fillText(clock(s), gx, 350);
+  telltales(c, W, H, s, 30, 0.16);
+}
+
+const LAYOUTS = { twinAnalog, digitalSport, retroAnalog, curvedPanel, fiveDial, twinTunnel, hexTFT, pod, digital80, gtrTriple, twinCounter, evStrip, virtualCockpit, jetTFT };
 
 /** Draw the cluster for a style. s: live state, G: gauge palette. */
 export function drawCluster(style, c, s, G) {
   const W = c.canvas.width, H = c.canvas.height;
-  const digital = style === 'digitalSport' || style === 'curvedPanel' || style === 'hexTFT' || style === 'pod';
+  const digital = ['digitalSport', 'curvedPanel', 'hexTFT', 'pod', 'evStrip', 'virtualCockpit', 'jetTFT'].includes(style);
   if (digital && s.boot.splash) { splash(c, W, H, s, G.ring); return; }
   (LAYOUTS[style] || twinAnalog)(c, W, H, s, G);
   if (s.boot.alpha < 1) { c.fillStyle = `rgba(0,0,0,${1 - s.boot.alpha})`; c.fillRect(0, 0, W, H); }

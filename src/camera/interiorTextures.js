@@ -270,6 +270,43 @@ export function badgeTexture(maker, colors) {
       x.beginPath(); x.moveTo(cx, cx - 112); x.lineTo(cx - 22, cx - 112); x.lineTo(cx - 104, cx + 104); x.lineTo(cx - 62, cx + 104); x.closePath(); x.fill();
       x.fillRect(cx - 44, cx + 22, 88, 18);
     },
+    // swallow in flight inside a ring
+    TSUBAME: () => {
+      x.strokeStyle = silver; x.lineWidth = 12; x.beginPath(); x.arc(cx, cx, 110, 0, Math.PI * 2); x.stroke();
+      x.fillStyle = c1; x.beginPath(); x.moveTo(cx - 88, cx - 40); x.quadraticCurveTo(cx - 20, cx - 10, cx, cx + 20); x.quadraticCurveTo(cx + 20, cx - 10, cx + 88, cx - 40);
+      x.quadraticCurveTo(cx + 30, cx + 20, cx + 12, cx + 70); x.lineTo(cx, cx + 50); x.lineTo(cx - 12, cx + 70); x.quadraticCurveTo(cx - 30, cx + 20, cx - 88, cx - 40); x.closePath(); x.fill();
+    },
+    // three stacked chevrons (lightning) in a dark rounded square
+    SHINDEN: () => {
+      x.fillStyle = '#101114'; x.beginPath(); x.roundRect(cx - 110, cx - 110, 220, 220, 34); x.fill(); x.strokeStyle = silver; x.lineWidth = 8; x.stroke();
+      x.strokeStyle = c1; x.lineWidth = 16; x.lineCap = 'round';
+      for (let k = 0; k < 3; k++) { x.beginPath(); x.moveTo(cx - 60, cx - 50 + k * 42); x.lineTo(cx, cx - 20 + k * 42); x.lineTo(cx + 60, cx - 50 + k * 42); x.stroke(); }
+    },
+    // four interlocked squares (estate maker)
+    VOGT: () => {
+      x.strokeStyle = silver; x.lineWidth = 12;
+      for (let k = 0; k < 4; k++) { x.strokeRect(cx - 118 + k * 54, cx - 30, 74, 60); }
+      x.fillStyle = c1; x.fillRect(cx - 118, cx + 44, 236, 10);
+    },
+    // circle with a lightning-cut V
+    VOLTA: () => {
+      x.fillStyle = c1; x.beginPath(); x.arc(cx, cx, 112, 0, Math.PI * 2); x.fill();
+      x.fillStyle = c2; x.beginPath(); x.moveTo(cx - 70, cx - 60); x.lineTo(cx - 30, cx - 60); x.lineTo(cx, cx + 20); x.lineTo(cx + 30, cx - 60); x.lineTo(cx + 70, cx - 60); x.lineTo(cx + 8, cx + 80); x.lineTo(cx - 8, cx + 80); x.closePath(); x.fill();
+    },
+    // winged script badge
+    ASHCOMBE: () => {
+      x.fillStyle = silver;
+      for (const sx of [-1, 1]) { x.beginPath(); x.moveTo(cx + sx * 40, cx - 26); x.lineTo(cx + sx * 124, cx - 46); x.lineTo(cx + sx * 116, cx - 24); x.lineTo(cx + sx * 40, cx + 10); x.closePath(); x.fill();
+        for (let k = 1; k < 4; k++) { x.fillRect(sx > 0 ? cx + 44 : cx - 44 - (70 - k * 12), cx - 18 + k * 9, 70 - k * 12, 3); } }
+      x.fillStyle = c1; x.fillRect(cx - 46, cx - 30, 92, 42);
+      x.fillStyle = silver; x.font = 'bold 26px Georgia, serif'; x.textAlign = 'center'; x.textBaseline = 'middle'; x.fillText('ASHCOMBE', cx, cx - 9);
+    },
+    // charging bull-free shield: a gold shield with a black arrowhead
+    FURIA: () => {
+      x.fillStyle = '#0b0b0c'; x.beginPath(); x.moveTo(cx - 96, cx - 112); x.lineTo(cx + 96, cx - 112); x.lineTo(cx + 96, cx + 20); x.quadraticCurveTo(cx + 80, cx + 90, cx, cx + 120); x.quadraticCurveTo(cx - 80, cx + 90, cx - 96, cx + 20); x.closePath(); x.fill();
+      x.strokeStyle = c1; x.lineWidth = 10; x.stroke();
+      x.fillStyle = c1; x.beginPath(); x.moveTo(cx, cx - 80); x.lineTo(cx + 54, cx + 50); x.lineTo(cx, cx + 22); x.lineTo(cx - 54, cx + 50); x.closePath(); x.fill();
+    },
   }[String(maker).toUpperCase()];
   if (shape) shape();
   else { x.fillStyle = c1; x.beginPath(); x.arc(cx, cx, 110, 0, Math.PI * 2); x.fill(); }
@@ -591,4 +628,41 @@ export function taillampTexture() {
   x.fillStyle = '#ff3a2c';
   x.fillRect(0, 2, 256, 3);
   return (cache.taillamp = tex(c, { srgb: true, repeat: false }));
+}
+
+/** Multi-function display on top of the dash (90s Japanese GT): boost, oil and water bar graphs. */
+export function mfdTexture() {
+  if (cache.mfd) return cache.mfd;
+  const c = canvas(512, 184), x = c.getContext('2d');
+  x.fillStyle = '#030405'; x.fillRect(0, 0, 512, 184);
+  const rows = [['BOOST', 0.62], ['OIL TEMP', 0.55], ['WATER', 0.48]];
+  x.font = '600 26px "Barlow Condensed", "Arial Narrow", Arial, sans-serif'; x.textBaseline = 'middle';
+  rows.forEach(([lab, v], i) => {
+    const y = 34 + i * 56;
+    x.fillStyle = '#ffae2a'; x.textAlign = 'left'; x.fillText(lab, 18, y);
+    for (let k = 0; k < 20; k++) { x.fillStyle = k / 20 < v ? (k > 15 ? '#ff4a2a' : '#ffae2a') : 'rgba(255,174,42,0.1)'; x.fillRect(150 + k * 17, y - 12, 12, 24); }
+  });
+  return (cache.mfd = tex(c, { repeat: false }));
+}
+
+/**
+ * Slim supercar headlamp (512 x 64): smoked black housing with three small projector modules and a chrome
+ * baseline, so a thin lamp lying on a low, sloping nose reads as a dark glass unit, not a mirror sheet.
+ */
+export function thinLampTexture() {
+  if (cache.thinLamp) return cache.thinLamp;
+  const c = canvas(512, 64), x = c.getContext('2d');
+  const bg = x.createLinearGradient(0, 0, 0, 64);
+  bg.addColorStop(0, '#1d2126'); bg.addColorStop(1, '#0a0c0f');
+  x.fillStyle = bg; x.fillRect(0, 0, 512, 64);
+  x.fillStyle = 'rgba(120,128,140,0.25)';
+  for (let i = 8; i < 512; i += 12) x.fillRect(i, 6, 2, 52);
+  for (const u of [0.3, 0.5, 0.7]) {
+    const cx = u * 512, cy = 34;
+    const g = x.createRadialGradient(cx, cy, 0, cx, cy, 22);
+    g.addColorStop(0, '#05070a'); g.addColorStop(0.45, '#0b0e12'); g.addColorStop(0.55, '#e9eef3'); g.addColorStop(0.75, '#7d8690'); g.addColorStop(1, 'rgba(30,34,40,0)');
+    x.fillStyle = g; x.fillRect(cx - 24, cy - 24, 48, 48);
+  }
+  x.fillStyle = '#d7dee6'; x.fillRect(0, 59, 512, 3);
+  return (cache.thinLamp = tex(c, { srgb: true, repeat: false }));
 }

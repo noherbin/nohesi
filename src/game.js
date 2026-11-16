@@ -748,10 +748,10 @@ export class Game {
     for (const ev of P.events) {
       if (ev.type === 'shift') {
         if (!attract) this.audio.shift(ev.dir > 0);
-        if (ev.dir > 0 && this.player.thr > 0.85 && ex !== 'stock') this._queuePops(1, 0.02);
+        if (ev.dir > 0 && this.player.thr > 0.85 && ex !== 'stock' && !def.engine.electric) this._queuePops(1, 0.02);
       } else if (ev.type === 'lift') {
         if (def.engine.turbo) this.audio.blowOff(ev.boost, def.engine.flutter);
-        if (ev.rpm > def.phys.redline * 0.5 && P.speed > 8) {
+        if (!def.engine.electric && ev.rpm > def.phys.redline * 0.5 && P.speed > 8) {
           const n = ex === 'straight' ? 6 + Math.floor(Math.random() * 6) : ex === 'sport' ? 3 + Math.floor(Math.random() * 4) : 1 + Math.floor(Math.random() * 2);
           this._queuePops(n, 0.06);
         }

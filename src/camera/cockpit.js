@@ -547,6 +547,7 @@ export class Cockpit {
       gear: P.gear, manual: ctx.manual, boost: P.boost ?? 0, isTurbo: !!P.isTurbo, hours: ctx.hours ?? 12, odo: this.odo,
       ind: ctx.indicator ?? 0, blink: !!ctx.blink, lights: (ctx.night ?? 0) > 0.4, handbrake: !!ctx.handbrake,
       boot: bootState(this.bootT), maker: def.maker, model: def.name,
+      thr: P.throttleEff ?? 0, ax: P.axS ?? 0, ay: P.ayS ?? 0, electric: !!def.engine.electric,
     };
     drawCluster(this.I.cluster, c, s, this.I.gauge);
     this.gaugeTex.needsUpdate = true;

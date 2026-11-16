@@ -6,8 +6,7 @@ import { clamp, lerp } from '../core/utils.js';
 import {
   leatherBump, plasticBump, carbonTexture, brushedTexture, speakerTexture, knurlTexture, climateTexture,
   spokeButtonsTexture, badgeTexture, weaveBump, alcantaraBump, quiltBump, channelBump, perforatedBump, woodTexture,
-  carpetBump, redCarbonTexture, radioTexture, slidersTexture, toggleLabelTexture, windowSwitchTexture,
-} from './interiorTextures.js';
+  carpetBump, redCarbonTexture, radioTexture, slidersTexture, toggleLabelTexture, windowSwitchTexture, mfdTexture } from './interiorTextures.js';
 
 export const RB = (w, h, d, r = 0.03, seg = 2) => new RoundedBoxGeometry(w, h, d, seg, Math.max(1e-4, Math.min(r, w / 2 - 1e-3, h / 2 - 1e-3, d / 2 - 1e-3)));
 export const _up = new THREE.Vector3(0, 1, 0);
@@ -132,6 +131,12 @@ const DASH = {
   muscle: { lip: 0.018, slope: 0.1, faceH: 0.42 },
   hex: { lip: -0.025, slope: 0.3, faceH: 0.36, angular: true },
   tub: { lip: -0.05, slope: 0.15, faceH: 0.17, beam: true },
+  eighties: { lip: 0.012, slope: 0.06, faceH: 0.4, step: 0.17 },
+  binnacle: { lip: 0.006, slope: 0.2, faceH: 0.4 },
+  gt: { lip: 0.012, slope: 0.22, faceH: 0.42 },
+  ev: { lip: -0.012, slope: 0.1, faceH: 0.3 },
+  quattro: { lip: 0.004, slope: 0.15, faceH: 0.4 },
+  jet: { lip: -0.03, slope: 0.32, faceH: 0.36, angular: true },
 };
 
 export function dash(K) {
@@ -272,6 +277,58 @@ export function dash(K) {
       onFace(fin, sx < 0 ? K.dx : dashHW - 0.2, yLip - 0.05, 0.006);
       fin.rotation.z = sx * 0.12;
     }
+  } else if (style === 'eighties') {
+    // flat 80s fascia: full-width silver pinstripe, a passenger grab handle and the glovebox outline
+    const pin = add(RB(dashHW * 2 - 0.1, 0.006, 0.006, 0.002), m.trim2);
+    onFace(pin, 0, yLip - 0.035, 0.005);
+    const grab = add(RB(0.22, 0.024, 0.03, 0.01), m.dashTop);
+    onFace(grab, dashHW - 0.24, yLip - 0.07, 0.02);
+    for (const yy of [yLip - 0.1, yLip - 0.24]) { const gl = add(RB(0.34, 0.004, 0.004, 0.001), m.rubber); onFace(gl, dashHW - 0.25, yy, 0.005); }
+  } else if (style === 'binnacle') {
+    // centre stack turned toward the driver, and a multi-function display in its own hood on the dash top
+    const stack = add(RB(0.25, 0.28, 0.1, 0.02), m.dash);
+    stack.position.set(K.stackX, yLip - 0.2, faceZ(yLip - 0.2) + 0.035);
+    stack.rotation.set(faceTilt, 0.16, 0, 'YXZ');
+    K.stack = stack;
+    const zP = zLip - 0.13, yP = dashTopAt(zP) + 0.028;
+    const pod = add(RB(0.18, 0.065, 0.09, 0.02), m.dashTop);
+    pod.position.set(K.stackX, yP, zP); pod.rotation.x = -0.28;
+    const scr = add(new THREE.PlaneGeometry(0.15, 0.054), K.M(new THREE.MeshBasicMaterial({ map: mfdTexture(), toneMapped: false })));
+    scr.position.set(K.stackX, yP + 0.012, zP + 0.046); scr.rotation.x = -0.28;
+  } else if (style === 'gt') {
+    // leather-wrapped fascia: a rolled leather band with twin stitch lines and a chrome pinstripe under it
+    const band = add(RB(dashHW * 2 - 0.14, 0.045, 0.014, 0.007), m.seat);
+    onFace(band, 0, yLip - 0.115, 0.007);
+    for (const yy of [yLip - 0.1, yLip - 0.13]) { const st2 = add(new THREE.BoxGeometry(dashHW * 2 - 0.16, 0.0022, 0.0022), m.stitch); onFace(st2, 0, yy, 0.015); }
+    const cl = add(RB(dashHW * 2 - 0.16, 0.004, 0.006, 0.002), m.chrome);
+    onFace(cl, 0, yLip - 0.148, 0.01);
+  } else if (style === 'ev') {
+    // slim floating dash with a full-width light line
+    const strip = add(RB(dashHW * 2 - 0.08, 0.005, 0.006, 0.002), K.P.ambient ? K.ambientMat : m.trim2);
+    onFace(strip, 0, yLip - 0.045, 0.006);
+    const shelf = add(RB(dashHW * 2 - 0.06, 0.012, 0.06, 0.005), m.trim);
+    onFace(shelf, 0, yBot + 0.02, 0.02);
+  } else if (style === 'quattro') {
+    // black-glass band across the centre, aluminium inlay on the passenger side
+    const gb = add(RB(0.46, 0.13, 0.01, 0.004), m.piano);
+    onFace(gb, K.stackX, yLip - 0.1, 0.006);
+    const inlay = add(RB(Math.max(0.1, dashHW - 0.3), 0.026, 0.008, 0.003), m.trim);
+    onFace(inlay, (K.stackX + 0.25 + dashHW - 0.04) / 2, yLip - 0.075, 0.006);
+    const fine = add(RB(dashHW * 2 - 0.1, 0.004, 0.006, 0.002), m.trim2);
+    onFace(fine, 0, yLip - 0.032, 0.006);
+  } else if (style === 'jet') {
+    // fighter-jet centre spine: a carbon ridge from the dash top into the console, aviation strakes
+    const sp = new THREE.Shape();
+    sp.moveTo(-0.1, 0); sp.lineTo(0.1, 0); sp.lineTo(0.05, -0.3); sp.lineTo(-0.05, -0.3); sp.lineTo(-0.1, 0);
+    const spm = add(extrudeZ(sp, 0.026, 0.004), m.carbon);
+    onFace(spm, K.stackX, yLip - 0.02, 0.012);
+    for (const sx of [-1, 1]) {
+      const st = add(RB(0.24, 0.01, 0.014, 0.003), m.trim2);
+      onFace(st, sx < 0 ? K.dx : dashHW - 0.2, yLip - 0.095, 0.008);
+      st.rotation.z = sx * -0.08;
+    }
+    const grab = add(RB(0.2, 0.026, 0.03, 0.01), m.carbon);
+    onFace(grab, dashHW - 0.22, yLip - 0.17, 0.02);
   } else if (style === 'tub') {
     // exposed carbon bulkhead below the floating beam
     const yb = yBot - 0.02;
@@ -417,6 +474,48 @@ export function centreStack(K) {
     K.g.add(stalk);
     vent(K, 'round', -dashHW + 0.07, yLip - 0.06, 0, 0); vent(K, 'round', dashHW - 0.07, yLip - 0.06, 0, 0);
   }
+  else if (I.dash === 'eighties') {
+    vent(K, 'rect', cx - 0.07, yLip - 0.075, 0.11, 0.045); vent(K, 'rect', cx + 0.07, yLip - 0.075, 0.11, 0.045);
+    vent(K, 'rect', -dashHW + 0.08, yLip - 0.07, 0.1, 0.045); vent(K, 'rect', dashHW - 0.08, yLip - 0.07, 0.1, 0.045);
+    const radio = add(new THREE.PlaneGeometry(0.18, 0.056), M(new THREE.MeshStandardMaterial({ map: radioTexture(), roughness: 0.3, emissive: 0xffffff, emissiveMap: radioTexture(), emissiveIntensity: 0.12 })));
+    K.onFace(radio, cx, yLip - 0.15, 0.006);
+  } else if (I.dash === 'binnacle') {
+    const st = K.stack;
+    const host = new THREE.Group();
+    host.position.copy(st.position); host.rotation.copy(st.rotation);
+    host.translateZ(0.051);
+    K.g.add(host);
+    vent(K, 'rect', -0.06, 0.095, 0.1, 0.045, host); vent(K, 'rect', 0.06, 0.095, 0.1, 0.045, host);
+    const scr = new THREE.Mesh(new THREE.PlaneGeometry(0.17, 0.075), navMat);
+    scr.position.set(0, 0.0, 0.002);
+    host.add(scr);
+    vent(K, 'rect', -dashHW + 0.08, yLip - 0.07, 0.1, 0.05); vent(K, 'rect', dashHW - 0.08, yLip - 0.07, 0.1, 0.05);
+  } else if (I.dash === 'gt') {
+    // screen rising out of the dash top, slim centre vents, eyeball vents at the ends
+    const scr = add(new THREE.PlaneGeometry(0.2, 0.085), navMat);
+    scr.position.set(cx, yLip + 0.05, eyeZ - 0.71); scr.rotation.x = -0.12;
+    const bz = add(RB(0.214, 0.099, 0.012, 0.006), m.piano);
+    bz.position.set(cx, yLip + 0.05, eyeZ - 0.718); bz.rotation.x = -0.12;
+    vent(K, 'slim', cx - 0.075, yLip - 0.065, 0.13, 0.028); vent(K, 'slim', cx + 0.075, yLip - 0.065, 0.13, 0.028);
+    vent(K, 'round', -dashHW + 0.07, yLip - 0.065, 0, 0); vent(K, 'round', dashHW - 0.07, yLip - 0.065, 0, 0);
+  } else if (I.dash === 'ev') {
+    // centre touchscreen, passenger display, vents hidden in a full-width slot
+    screenOnFace(0.26, 0.1, yLip - 0.085, 0.01);
+    const ps = add(new THREE.PlaneGeometry(0.24, 0.085), navMat);
+    K.onFace(ps, dashHW - 0.26, yLip - 0.08, 0.0172);
+    const pb = add(RB(0.252, 0.097, 0.016, 0.006), m.piano);
+    K.onFace(pb, dashHW - 0.26, yLip - 0.08, 0.008);
+    vent(K, 'slim', -dashHW + 0.11, yLip - 0.03, 0.16, 0.014); vent(K, 'slim', cx, yLip - 0.025, 0.3, 0.012);
+  } else if (I.dash === 'quattro') {
+    // upper infotainment screen in the black-glass band; the climate screen sits below it
+    screenOnFace(0.24, 0.1, yLip - 0.1, 0.008);
+    vent(K, 'slim', -dashHW + 0.1, yLip - 0.07, 0.14, 0.03); vent(K, 'slim', dashHW - 0.1, yLip - 0.07, 0.14, 0.03);
+    vent(K, 'slim', cx - 0.2, yLip - 0.04, 0.12, 0.022); vent(K, 'slim', cx + 0.2, yLip - 0.04, 0.12, 0.022);
+  } else if (I.dash === 'jet') {
+    screenOnFace(0.13, 0.065, yLip - 0.115, 0.01);
+    vent(K, 'round', cx - 0.13, yLip - 0.07, 0, 0); vent(K, 'round', cx + 0.13, yLip - 0.07, 0, 0);
+    vent(K, 'round', -dashHW + 0.07, yLip - 0.06, 0, 0); vent(K, 'round', dashHW - 0.07, yLip - 0.06, 0, 0);
+  }
   // ---- climate controls
   const yC = yLip - 0.165;
   if (CL === 'knobs') {
@@ -433,9 +532,13 @@ export function centreStack(K) {
     const p = add(new THREE.PlaneGeometry(0.21, 0.0525), pm);
     if (CL === 'buttons') K.onWaterfall(p, cx, 0.3, 0.002);
     else K.onFace(p, cx, yLip - 0.172, 0.004);
+  } else if (CL === 'sliders' && I.dash !== 'wrap') {
+    // 80s slider climate panel under the head unit
+    const sl = add(new THREE.PlaneGeometry(0.19, 0.0475), M(new THREE.MeshStandardMaterial({ map: slidersTexture(), roughness: 0.4 })));
+    K.onFace(sl, cx, yLip - 0.215, 0.006);
   } else if (CL === 'toggles') {
     // aluminium toggle switches behind a guard bar, labelled
-    const labels = I.dash === 'hex' ? ['ESC', 'LIFT', 'HAZ', 'A/C', 'REC', 'DEF'] : ['TRACT', 'MODE', 'HAZ', 'LANE', 'STOP'];
+    const labels = I.dash === 'hex' ? ['ESC', 'LIFT', 'HAZ', 'A/C', 'REC', 'DEF'] : I.dash === 'jet' ? ['ESC', 'LIFT', 'AUX', 'A/C', 'DEF'] : ['TRACT', 'MODE', 'HAZ', 'LANE', 'STOP'];
     const n = labels.length, w = 0.04 * n;
     const ww = Math.min(w, 0.22);
     const lab = add(new THREE.PlaneGeometry(ww, ww * 96 / 512 * 1.1), M(new THREE.MeshStandardMaterial({ map: toggleLabelTexture(labels), roughness: 0.5 })));
@@ -607,6 +710,39 @@ export function cluster(K) {
     hm.scale.set(wS / 0.32, scl, 1);
     hm.position.set(dx, yCl - 0.045 * scl, zCl - 0.01);
     hm.rotation.x = tilt;
+  } else if (style === 'digital80') {
+    // square 80s binnacle with a smoked acrylic lens over the displays
+    plane(wS, hFit, dx, yCl, zCl, tilt);
+    const lens = add(new THREE.PlaneGeometry(wS + 0.01, hFit + 0.01), M(new THREE.MeshPhysicalMaterial({ color: 0x000000, roughness: 0.05, transparent: true, opacity: 0.18, clearcoat: 1 })));
+    lens.position.set(dx, yCl, zCl + 0.012); lens.rotation.x = tilt;
+    const box = add(RB(wS + 0.05, hFit + 0.04, 0.03, 0.006), m.dashTop);
+    box.position.set(dx, yCl, zCl - 0.02); box.rotation.x = tilt;
+    hood(wS + 0.07, hFit * 0.9, 0.06, dx, 0);
+  } else if (style === 'gtrTriple') {
+    plane(wS, hFit, dx, yCl, zCl, tilt);
+    ringsOn(wS, [[190, 220, 150], [512, 196, 184], [836, 160, 104], [900, 318, 58]], 0.016, m.trim2, 0.003);
+    hood(wS + 0.05, hFit * 0.85, 0.05, dx, 0);
+  } else if (style === 'twinCounter') {
+    plane(wS, hFit, dx, yCl, zCl, tilt);
+    ringsOn(wS, [[222, 196, 176], [802, 196, 176]], 0.02, m.chrome, 0.004);
+    hood(wS + 0.05, hFit * 0.8, 0.045, dx, 0, m.seat);
+  } else if (style === 'evStrip') {
+    // free-standing curved display on a slim stem, no hood
+    plane(wS, hFit * 0.9, dx, yCl, zCl, tilt, 0.6);
+    const bz = add(RB(wS + 0.018, hFit * 0.9 + 0.016, 0.012, 0.006), m.piano); bz.position.set(dx, yCl - 0.001, zCl - 0.012); bz.rotation.x = tilt;
+  } else if (style === 'virtualCockpit') {
+    plane(wS, hFit, dx, yCl, zCl, tilt);
+    const bz = add(RB(wS + 0.016, hFit + 0.016, 0.014, 0.006), m.piano); bz.position.set(dx, yCl - 0.002, zCl - 0.012); bz.rotation.x = tilt;
+    hood(wS + 0.05, hFit * 0.78, 0.04, dx, 0);
+  } else if (style === 'jetTFT') {
+    plane(wS, hFit, dx, yCl, zCl, tilt);
+    // angular carbon cowl
+    const cw = new THREE.Shape();
+    cw.moveTo(-0.2, 0); cw.lineTo(-0.17, 0.11); cw.lineTo(-0.06, 0.125); cw.lineTo(0.06, 0.125); cw.lineTo(0.17, 0.11); cw.lineTo(0.2, 0); cw.lineTo(0.185, 0); cw.lineTo(0.157, 0.096); cw.lineTo(-0.157, 0.096); cw.lineTo(-0.185, 0); cw.lineTo(-0.2, 0);
+    const cm = add(extrudeZ(cw, 0.1, 0.004), m.carbon);
+    cm.scale.set(wS / 0.33, scl, 1);
+    cm.position.set(dx, yCl - 0.052 * scl, zCl - 0.01);
+    cm.rotation.x = tilt;
   } else if (style === 'pod') {
     // carried on the steering column (added to the wheel assembly in wheel())
     // the pod lives on the steering column (see wheel())
@@ -662,8 +798,8 @@ export function wheel(K) {
     wheelGroup.add(podG);
   }
   // ---- rim
-  const shape = { sport3: 'round', hatch3: 'flat', classic3: 'round', mThick: 'flat', gt3: 'round', muscle3: 'flat', super: 'flat2', race: 'squircle' }[style] || 'round';
-  const thick = { classic3: 0.0165, mThick: 0.0245, muscle3: 0.024, race: 0.02, super: 0.021 }[style] ?? 0.0205;
+  const shape = { sport3: 'round', hatch3: 'flat', classic3: 'round', mThick: 'flat', gt3: 'round', muscle3: 'flat', super: 'flat2', race: 'squircle', four80: 'round', momo3: 'round', gtFlat: 'flat2', ev2: 'flat2', rsFlat: 'flat', jetY: 'flat2' }[style] || 'round';
+  const thick = { classic3: 0.0165, mThick: 0.0245, muscle3: 0.024, race: 0.02, super: 0.021, four80: 0.019, momo3: 0.0165, gtFlat: 0.021, ev2: 0.02, rsFlat: 0.023, jetY: 0.021 }[style] ?? 0.0205;
   const pts = [];
   const N = 120;
   for (let i = 0; i < N; i++) {
@@ -775,6 +911,38 @@ export function wheel(K) {
     for (const sx of [-1, 1]) spoke(sx * (0.06 + len / 2), -0.01, len, 0.04, 0.022, m.wheelBody);
     spoke(0, -0.06 - R * 0.3, 0.05, R * 0.6, 0.02, m.wheelBody);
     for (const sx of [-1, 1]) spoke(sx * (0.06 + len / 2), -0.031, len, 0.006, 0.024, m.alu);
+  } else if (style === 'four80') {
+    // 80s four-spoke: spokes in a shallow X around a big padded horn pad
+    for (const [a, w] of [[0.32, 0.03], [Math.PI - 0.32, 0.03], [-0.5, 0.034], [Math.PI + 0.5, 0.034]]) spoke(Math.cos(a) * R * 0.55, Math.sin(a) * R * 0.55, R * 0.62, w, 0.016, m.wheelBody, a);
+    const pad = new THREE.Mesh(RB(0.11, 0.08, 0.04, 0.025), m.wheelBody); pad.position.set(0, 0, 0.012); rotor.add(pad);
+  } else if (style === 'momo3') {
+    // aftermarket-style three slim satin-black spokes with slots and a small round horn button
+    for (const [a, w] of [[0, 0.028], [Math.PI, 0.028], [-Math.PI / 2, 0.03]]) {
+      const sp = new THREE.Mesh(new THREE.BoxGeometry(R - 0.03, w, 0.006), m.piano);
+      sp.position.set(Math.cos(a) * (R / 2 + 0.01), Math.sin(a) * (R / 2 + 0.01), 0.006); sp.rotation.z = a; rotor.add(sp);
+      const slot = new THREE.Mesh(RB(R * 0.32, w * 0.3, 0.002, 0.003), m.rubber);
+      slot.position.set(Math.cos(a) * R * 0.58, Math.sin(a) * R * 0.58, 0.0095); slot.rotation.z = a; rotor.add(slot);
+    }
+    const hb = new THREE.Mesh(new THREE.CylinderGeometry(0.034, 0.036, 0.026, 28).rotateX(Math.PI / 2), m.rubber); hb.position.z = 0.012; rotor.add(hb);
+  } else if (style === 'gtFlat') {
+    // grand tourer: two broad leather spokes with chrome inlays, squared top and bottom
+    for (const sx of [-1, 1]) { spoke(sx * (0.06 + len / 2), -0.01, len, 0.06, 0.026, m.wheelBody); buttons(sx, len); spoke(sx * (0.06 + len / 2), -0.045, len, 0.006, 0.028, m.chrome); }
+    spoke(0, -0.06 - R * 0.3, 0.05, R * 0.55, 0.02, m.chrome);
+  } else if (style === 'ev2') {
+    // electric: thin two-spoke with capacitive pads and a drive-mode dial
+    for (const sx of [-1, 1]) { spoke(sx * (0.06 + len / 2), -0.006, len, 0.05, 0.02, m.wheelBody); buttons(sx, len, -0.006); }
+    const dial2 = new THREE.Mesh(new THREE.CylinderGeometry(0.014, 0.014, 0.01, 20).rotateX(Math.PI / 2), m.knurl); dial2.position.set(0.075, -0.05, 0.016); rotor.add(dial2);
+  } else if (style === 'rsFlat') {
+    // flat-bottomed sport wheel: switch-pod spokes, a single wide lower spoke with a red drive-select button
+    for (const sx of [-1, 1]) { spoke(sx * (0.06 + len / 2), -0.012, len, 0.06, 0.025, m.wheelBody); buttons(sx, len); }
+    spoke(0, -0.06 - R * 0.3, 0.08, R * 0.58, 0.022, m.wheelBody);
+    const rs = new THREE.Mesh(RB(0.03, 0.016, 0.008, 0.005), M(new THREE.MeshStandardMaterial({ color: 0xc8102e, roughness: 0.4 }))); rs.position.set(0.05, -0.065, 0.018); rotor.add(rs);
+  } else if (style === 'jetY') {
+    // Y-spoke carbon wheel, flat top and bottom, red start button and a drive-mode rocker on the spokes
+    for (const sx of [-1, 1]) spoke(sx * (0.05 + len / 2) * 0.95, 0.03, len, 0.05, 0.024, m.carbon, sx * 0.38);
+    spoke(0, -0.06 - R * 0.28, 0.04, R * 0.5, 0.022, m.carbon);
+    const red = new THREE.Mesh(new THREE.CylinderGeometry(0.012, 0.012, 0.01, 18).rotateX(Math.PI / 2), m.redGlow); red.position.set(-0.052, -0.055, 0.018); rotor.add(red);
+    const mode = new THREE.Mesh(RB(0.026, 0.014, 0.01, 0.004), m.alu); mode.position.set(0.052, -0.055, 0.018); rotor.add(mode);
   } else if (style === 'super') {
     for (const sx of [-1, 1]) { spoke(sx * (0.058 + len / 2), -0.014, len, 0.058, 0.026, m.carbon); buttons(sx, len, -0.014); }
     spoke(0, -0.06 - R * 0.28, 0.04, R * 0.5, 0.022, m.carbon);
@@ -799,7 +967,7 @@ export function wheel(K) {
   }
   // hub / airbag with the maker emblem
   const hubShape = W.hub;
-  if (hubShape !== 'none' && style !== 'classic3') {
+  if (hubShape !== 'none' && style !== 'classic3' && style !== 'momo3' && style !== 'four80') {
     const hw = hubShape === 'wide' ? 0.15 : hubShape === 'big' ? 0.15 : hubShape === 'hex' ? 0.12 : hubShape === 'shield' ? 0.12 : 0.13;
     const hh = hubShape === 'big' ? 0.125 : 0.11;
     let hub;
@@ -812,15 +980,15 @@ export function wheel(K) {
     hub.position.set(0, -0.004, 0.012);
     rotor.add(hub);
   }
-  const badgeColors = { KESSLER: ['#1c69d4', '#e8eaec'], KAZE: ['#1d4fbf', '#d4d7db'], SAKURA: ['#e8222e', '#fff'], RAIDEN: ['#d8d8dc', '#111'], STRADA: ['#c9a34a', '#111'], IRONHORSE: ['#e05a12', '#111'], VELOCE: ['#7cc42d', '#111'], AETHER: ['#c9a34a', '#222'] };
+  const badgeColors = { KESSLER: ['#1c69d4', '#e8eaec'], KAZE: ['#1d4fbf', '#d4d7db'], SAKURA: ['#e8222e', '#fff'], RAIDEN: ['#d8d8dc', '#111'], STRADA: ['#c9a34a', '#111'], IRONHORSE: ['#e05a12', '#111'], VELOCE: ['#7cc42d', '#111'], AETHER: ['#c9a34a', '#222'], TSUBAME: ['#c8102e', '#fff'], SHINDEN: ['#38b6e0', '#111'], VOGT: ['#c8102e', '#ddd'], VOLTA: ['#3fd8ff', '#0b0d10'], ASHCOMBE: ['#124f37', '#ddd'], FURIA: ['#f2c230', '#111'] };
   const logo = new THREE.Mesh(new THREE.CircleGeometry(hubShape === 'none' ? 0.02 : style === 'classic3' ? 0.022 : 0.024, 32), M(new THREE.MeshStandardMaterial({ map: badgeTexture(def.maker, badgeColors[def.maker] || [K.P.accent, '#eee']), transparent: true, roughness: 0.3, metalness: 0.4 })));
-  logo.position.set(0, style === 'race' ? 0.018 : 0.004, style === 'classic3' ? 0.028 : style === 'race' ? 0.0205 : 0.0385);
+  logo.position.set(0, style === 'race' ? 0.018 : 0.004, style === 'classic3' || style === 'momo3' ? 0.028 : style === 'four80' ? 0.0335 : style === 'race' ? 0.0205 : 0.0385);
   if (style === 'race') logo.scale.setScalar(0.6);
   rotor.add(logo);
   // sight lines from the eye over the rim top and the hub top, used to fit the cluster into the gap between them
   const tilt = wheelGroup.rotation.x, wy = wheelGroup.position.y, wz = wheelGroup.position.z;
   const rTop = shape === 'squircle' ? R * 0.82 : shape === 'flat2' ? R * 0.86 : R;
-  const hubTop = hubShape === 'none' ? 0.03 : style === 'classic3' ? 0.04 : hubShape === 'big' ? 0.065 : 0.058;
+  const hubTop = hubShape === 'none' ? 0.03 : style === 'classic3' || style === 'momo3' ? 0.04 : style === 'four80' ? 0.045 : hubShape === 'big' ? 0.065 : 0.058;
   const sight = (py, pz) => (z) => eyeY + (py - eyeY) * (z - eyeZ) / (pz - eyeZ);
   K.rimSight = sight(wy + (rTop + thick) * Math.cos(tilt), wz + (rTop + thick) * Math.sin(tilt));
   K.hubSight = sight(wy + hubTop * Math.cos(tilt), wz + hubTop * Math.sin(tilt) + 0.03);
