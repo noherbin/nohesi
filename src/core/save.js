@@ -23,6 +23,7 @@ export const DEFAULT_SETTINGS = {
   unlockAll: false,
   camera: 'chase',
   plate: 'NO HESI',
+  playerName: '',
 };
 
 export function defaultSave() {
@@ -35,6 +36,7 @@ export function defaultSave() {
     challenges: {},
     settings: { ...DEFAULT_SETTINGS },
     stats: { distance: 0, nearMisses: 0, runs: 0, topSpeed: 0, crashes: 0 },
+    lb: { endless: [], timeattack: [], speed: [] },
     last: { mode: 'endless', env: 'la', time: 'default', weather: 'clear', density: 'normal' },
   };
 }

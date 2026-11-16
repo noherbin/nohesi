@@ -2,7 +2,8 @@
 import { PLAYER_CARS, CAR_BY_ID, CUSTOM_OPTIONS } from '../config/cars.js';
 import { ENVIRONMENTS, ENV_ORDER, TIMES, WEATHERS, DENSITIES } from '../config/environments.js';
 import { CHALLENGES, GOAL_LABEL } from '../config/challenges.js';
-import { formatInt } from '../core/utils.js';
+import { formatInt, M_TO_MI } from '../core/utils.js';
+import { BOARDS, cleanName } from '../gameplay/leaderboard.js';
 
 const $ = (id) => document.getElementById(id);
 const h = (tag, cls, html) => {
@@ -96,6 +97,7 @@ export class UI {
     if (screen === 'garage') this.renderGarage();
     if (screen === 'custom') this.renderCustom();
     if (screen === 'challenges') this.renderChallenges();
+    if (screen === 'leaderboard') this.renderLeaderboard();
     if (screen === 'settings') this.renderSettings();
     g.onScreen(screen);
   }
@@ -390,6 +392,116 @@ export class UI {
       list.appendChild(el);
     }
     $('ch-progress').textContent = `${done} / ${CHALLENGES.length} COMPLETE`;
+  }
+
+  /* ------------------------------------------------------------ leaderboard */
+  renderLeaderboard() {
+    const g = this.game;
+    const L = g.leaderboard;
+    if (!this._lbInit) {
+      this._lbInit = true;
+      this.lbBoard = 'endless';
+      L.onChange(() => { if (this.screen === 'leaderboard') this.renderLeaderboard(); });
+      const inp = $('lb-name');
+      inp.addEventListener('input', () => {
+        g.save.settings.playerName = cleanName(inp.value);
+        g.saveNow();
+        L.rename();
+      });
+      inp.addEventListener('blur', () => { inp.value = L.name; });
+      inp.addEventListener('keydown', (e) => { if (e.key === 'Enter') inp.blur(); });
+    }
+    // the shared board is the default wherever it exists; this device's board otherwise
+    if (!this.lbScope || (this.lbScope === 'global' && !L.globalAvailable && L.status !== 'connecting')) this.lbScope = L.globalAvailable || L.status === 'connecting' ? 'global' : 'local';
+    if (this.lbScope === 'local' && L.globalAvailable && !this._lbPicked) this.lbScope = 'global';
+    const board = BOARDS.find((b) => b.id === this.lbBoard);
+    const inp = $('lb-name');
+    if (document.activeElement !== inp) inp.value = L.name;
+
+    const tabs = $('lb-boards');
+    tabs.innerHTML = '';
+    for (const b of BOARDS) {
+      const t = h('button', 'tab' + (b.id === this.lbBoard ? ' sel' : ''), b.name);
+      t.onclick = () => { g.audio.click(); this.lbBoard = b.id; this.renderLeaderboard(); };
+      tabs.appendChild(t);
+    }
+    const scope = $('lb-scope');
+    scope.innerHTML = '';
+    const scopes = L.status === 'off' || L.status === 'error' ? [['local', 'THIS DEVICE']] : [['global', 'GLOBAL'], ['local', 'THIS DEVICE']];
+    for (const [v, n] of scopes) {
+      const b = h('button', this.lbScope === v ? 'sel' : '', n);
+      b.onclick = () => { g.audio.click(); this.lbScope = v; this._lbPicked = true; this.renderLeaderboard(); };
+      scope.appendChild(b);
+    }
+    scope.style.display = scopes.length > 1 ? '' : 'none';
+
+    $('lb-col').textContent = board.label;
+    const statusTxt = { connecting: 'CONNECTING…', readonly: 'GLOBAL · VIEW ONLY', error: 'GLOBAL BOARD UNAVAILABLE' }[L.status] || '';
+    $('lb-status').textContent = statusTxt;
+    const what = { endless: 'Best Endless score', timeattack: 'Furthest distance in a two-minute Time Attack', speed: 'Fastest speed reached in an Endless or Time Attack run' }[board.id];
+    let note;
+    if (this.lbScope === 'global') {
+      note = `${what}, one entry per driver. Your personal bests post here automatically.`;
+      if (L.status === 'readonly') note = `${what}, one entry per driver. You can view the global board, but runs from this account stay on this device.`;
+      if (L.status === 'ready' && !L.name) note += ' Set a driver name — until you do, your Claude name is shown.';
+    } else {
+      note = `${what} — the top 10 runs on this device.`;
+      if (L.status === 'off') note += ' A shared global board appears when the game is played on claude.ai.';
+      if (L.status === 'error') note += ' The global board could not be reached right now.';
+    }
+    $('lb-note').textContent = note;
+
+    const body = $('lb-rows');
+    const empty = $('lb-empty');
+    const units = g.S.units;
+    const fmtVal = (v) => {
+      if (board.id === 'endless') return formatInt(v);
+      if (board.id === 'timeattack') return units === 'kmh' ? `${(v / 1000).toFixed(2)} km` : `${(v * M_TO_MI).toFixed(2)} mi`;
+      return units === 'kmh' ? `${Math.round(v * 1.609344)} km/h` : `${v.toFixed(1)} mph`;
+    };
+    const fmtDet = (r) => {
+      if (!r.at && r.car == null) return 'Personal best from before the leaderboard';
+      const nm = r.nm != null ? `${r.nm} near miss${r.nm === 1 ? '' : 'es'}` : '';
+      const env = ENVIRONMENTS[r.env]?.short || '';
+      if (board.id === 'endless') return [nm, r.dist ? g.fmtDist(r.dist) : '', env].filter(Boolean).join(' · ');
+      if (board.id === 'timeattack') return [nm, r.score ? `${formatInt(r.score)} pts` : '', env].filter(Boolean).join(' · ');
+      return env;
+    };
+    const fmtDate = (at) => (at ? new Date(at).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: new Date(at).getFullYear() !== new Date().getFullYear() ? 'numeric' : undefined }) : '');
+    const fill = (rows) => {
+      body.innerHTML = '';
+      for (const r of rows) {
+        const tr = h('tr', [r.rank <= 3 ? `top${r.rank}` : '', r.me && this.lbScope === 'global' ? 'me' : ''].filter(Boolean).join(' '));
+        const cell = (cls, text) => { const td = h('td', cls); td.textContent = text; tr.appendChild(td); };
+        cell('c-rank', String(r.rank));
+        cell('name', r.name);
+        cell('car', g.leaderboard.carName(r.car));
+        cell('c-val', fmtVal(r.v));
+        cell('c-det', fmtDet(r));
+        cell('c-date', fmtDate(r.at));
+        body.appendChild(tr);
+      }
+    };
+
+    if (this.lbScope === 'local') {
+      const rows = L.localRows(board.id);
+      fill(rows);
+      empty.textContent = rows.length ? '' : (board.id === 'timeattack' ? 'No Time Attack runs yet. Drive one from DRIVE → TIME ATTACK.' : board.id === 'speed' ? 'No runs yet. Your top speed is recorded at the end of every Endless or Time Attack run.' : 'No runs yet. Your score is recorded when an Endless run ends.');
+      return;
+    }
+    if (L.status === 'connecting') { fill([]); empty.textContent = 'Connecting to the global board…'; return; }
+    const token = (this._lbToken = (this._lbToken || 0) + 1);
+    if (!body.children.length || this._lbShown !== board.id + this.lbScope) { fill([]); empty.textContent = 'Loading…'; }
+    this._lbShown = board.id + this.lbScope;
+    L.globalRows(board.id).then((rows) => {
+      if (token !== this._lbToken || this.screen !== 'leaderboard') return;
+      fill(rows);
+      empty.textContent = rows.length ? '' : 'No one is on this board yet. Finish a run to take first place.';
+    }).catch(() => {
+      if (token !== this._lbToken) return;
+      fill([]);
+      empty.textContent = 'The global board could not be loaded. Try again in a moment.';
+    });
   }
 
   /* ------------------------------------------------------------ settings */

@@ -20,6 +20,7 @@ import { wallCollision, trafficCollisions } from './gameplay/collisions.js';
 import { Autopilot } from './gameplay/autopilot.js';
 import { GarageScene } from './garage/garageScene.js';
 import { UI, MODES } from './ui/ui.js';
+import { Leaderboard } from './gameplay/leaderboard.js';
 import { HUD } from './ui/hud.js';
 import { PLAYER_CARS, CAR_BY_ID } from './config/cars.js';
 import { ENVIRONMENTS, TIMES, DENSITIES } from './config/environments.js';
@@ -54,6 +55,7 @@ export class Game {
 
   async init() {
     this.save = loadSave();
+    this.leaderboard = new Leaderboard(this);
     this.input = new Input();
     this.audio = new AudioSystem();
     this.ui = new UI(this);
@@ -481,6 +483,23 @@ export class Game {
     }
   }
 
+  /** Put a finished run on the leaderboards and tell the player where it placed. */
+  _recordRun(mode, sum) {
+    const r = this.leaderboard.record({
+      mode, score: sum.score, distance: sum.distance, topSpeed: sum.topSpeed, nearMisses: sum.nearMisses,
+      car: this.carDef.id, env: this.env?.id,
+    });
+    const main = mode;
+    const local = r.local[main];
+    r.global.then((g) => {
+      const bits = [];
+      if (local && local <= 3) bits.push(`#${local} ON THIS DEVICE`);
+      if (g[main]) bits.push(`#${g[main]} GLOBAL`);
+      if (g.speed) bits.push(`TOP SPEED #${g.speed} GLOBAL`);
+      if (bits.length) this.ui.toast(`LEADERBOARD · ${bits.join(' · ')}`, 'gold');
+    });
+  }
+
   /** End of an endless run (crash or exit). */
   _bankRun(crashed) {
     const sum = this.scoring.summary();
@@ -493,6 +512,7 @@ export class Game {
     const newBest = sum.score > this.save.best.endless;
     if (newBest) this.save.best.endless = sum.score;
     this._bankScore(sum.score);
+    this._recordRun('endless', sum);
     this.saveNow();
     return { sum, newBest };
   }
@@ -800,6 +820,7 @@ export class Game {
         const newBest = sum.distance > best;
         if (newBest) this.save.best.timeattack = Math.floor(sum.distance);
         this._bankScore(sum.score);
+        this._recordRun('timeattack', sum);
         this.saveNow();
         this._showResults({
           kicker: newBest ? 'NEW PERSONAL BEST' : 'TIME ATTACK',

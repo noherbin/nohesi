@@ -41,6 +41,7 @@ Browsers reserve Ctrl+W (close tab). The game asks before closing while you're d
 - **Traffic AI:** IDM car-following, lane changes with turn signals, brake lights, honking when you cut them off, cars, SUVs, pickups, vans, box trucks and semis, plus oncoming traffic. Density grows as a run goes on.
 - **No Hesi scoring:** overtakes, close and extremely close passes, splits between two cars, chains, speed streaks, dense-traffic bonus, multipliers with a combo timer. Crashing ends the run.
 - **Modes:** Endless Highway, Free Drive, Time Attack (2 minutes), 10 Challenges.
+- **Leaderboard:** Endless score, Time Attack distance and Top Speed boards. The top 10 runs on each device are kept in the save; when the game is played as a claude.ai artifact, a shared global board ranks every driver's personal bests (set a driver name on the leaderboard screen).
 - **Cameras:** chase, far chase, cockpit (working gauges, steering wheel and hands, live mirrors, dash lighting), hood, bumper, cinematic.
 - **Audio:** engine sound synthesised per engine layout (flat-4, I4, rotary, I6, flat-6, V8, V10) with RPM crossfades, turbo whistle and blow-off, supercharger whine, exhaust pops, shifts, tyre squeal, wind, road and rain noise, pass-by whooshes, horns, crashes and optional procedural synthwave.
 - **Graphics:** dynamic shadows plus soft contact shadows under every car, physically based paint with clearcoat (traffic too), bloom, time-of-day colour grading, sun lens flare, sky with clouds, stars and an overcast layer for rain, fog, night lighting modelled on real No Hesi runs (white LED streetlights that light the cars passing under them, a near-black sky, headlight flares only from lamps pointed at you), retroreflective lane markers, wet-road reflections, road spray in the rain, raindrops on the windscreen in cockpit view, motion blur, auto quality scaling.
@@ -65,7 +66,7 @@ src/
   world/                      road path generation, highway chunks, props, scenery details, textures, sky
   vehicles/                   procedural car builder, physics, player car
   traffic/                    traffic AI and instanced rendering
-  gameplay/                   scoring, collisions, autopilot (menu background)
+  gameplay/                   scoring, collisions, leaderboard, autopilot (menu background)
   camera/                     camera rig and cockpit interior
   fx/                         glows, particles, rain, post-processing
   audio/                      engine synthesis, sound system, music

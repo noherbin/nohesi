@@ -35,7 +35,8 @@
         <button class="menu-item" data-go="garage"><span class="mi-k">02</span>GARAGE</button>
         <button class="menu-item" data-go="custom"><span class="mi-k">03</span>CUSTOMIZE</button>
         <button class="menu-item" data-go="challenges"><span class="mi-k">04</span>CHALLENGES</button>
-        <button class="menu-item" data-go="settings"><span class="mi-k">05</span>SETTINGS</button>
+        <button class="menu-item" data-go="leaderboard"><span class="mi-k">05</span>LEADERBOARD</button>
+        <button class="menu-item" data-go="settings"><span class="mi-k">06</span>SETTINGS</button>
       </nav>
       <div class="menu-stats">
         <div><span>CAREER</span><b id="m-career">0</b></div>
@@ -119,6 +120,24 @@
   <section id="s-challenges" class="screen panel-screen">
     <header class="screen-head"><button class="back" data-go="menu">‹ BACK</button><h2>CHALLENGES</h2><span id="ch-progress" class="head-sub"></span></header>
     <div id="ch-list" class="ch-list"></div>
+  </section>
+
+  <!-- Leaderboard -->
+  <section id="s-leaderboard" class="screen panel-screen">
+    <header class="screen-head"><button class="back" data-go="menu">‹ BACK</button><h2>LEADERBOARD</h2><span id="lb-status" class="head-sub"></span></header>
+    <div class="lb-wrap">
+      <div class="lb-bar">
+        <div id="lb-boards" class="tabs lb-tabs" role="tablist"></div>
+        <div id="lb-scope" class="seg"></div>
+        <label class="lb-name"><span>DRIVER NAME</span><input type="text" id="lb-name" maxlength="16" spellcheck="false" autocomplete="off" placeholder="YOUR NAME"></label>
+      </div>
+      <div id="lb-note" class="lb-note"></div>
+      <table class="lb-table">
+        <thead><tr><th class="c-rank">#</th><th>DRIVER</th><th>CAR</th><th id="lb-col" class="c-val">SCORE</th><th class="c-det">DETAILS</th><th class="c-date">DATE</th></tr></thead>
+        <tbody id="lb-rows"></tbody>
+      </table>
+      <div id="lb-empty" class="lb-empty"></div>
+    </div>
   </section>
 
   <!-- Settings -->
