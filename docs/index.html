@@ -85,7 +85,14 @@
   <!-- Garage -->
   <section id="s-garage" class="screen garage-screen">
     <header class="screen-head"><button class="back" data-go="menu">‹ BACK</button><h2>GARAGE</h2><span id="g-cash" class="head-cash"></span></header>
-    <div id="car-list" class="car-list"></div>
+    <div id="car-list" class="car-col">
+      <div class="cl-head">
+        <div class="cl-count"><b id="cl-owned">0</b> of <span id="cl-total">0</span> cars owned</div>
+        <div id="cl-bar" class="cl-bar" aria-hidden="true"></div>
+        <div id="cl-filter" class="cl-filter"><button data-f="all">All</button><button data-f="owned">Owned</button><button data-f="shop">For sale</button></div>
+      </div>
+      <div id="cl-cards" class="cl-cards"></div>
+    </div>
     <div class="car-info">
       <div id="ci-maker" class="ci-maker"></div>
       <div id="ci-name" class="ci-name"></div>
@@ -93,7 +100,7 @@
       <p id="ci-blurb" class="ci-blurb"></p>
       <div id="ci-stats" class="ci-stats"></div>
       <div class="ci-actions">
-        <button id="btn-select" class="btn primary">SELECT</button>
+        <button id="btn-select" class="btn primary">DRIVE THIS CAR</button>
         <button id="btn-tocustom" class="btn ghost">CUSTOMIZE</button>
       </div>
       <div id="ci-lock" class="ci-lock hidden"></div>

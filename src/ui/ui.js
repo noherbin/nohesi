@@ -108,7 +108,7 @@ export class UI {
     if (el) el.classList.add('active');
     // focus first control for keyboard/gamepad users
     setTimeout(() => {
-      const f = el?.querySelector('.menu-item, .btn.primary, .card.sel, .car-item.sel, button');
+      const f = el?.querySelector('.menu-item, .car-card.sel, .btn.primary, .card.sel, button');
       if (f && this.game.input.padActive) f.focus();
     }, 30);
   }
@@ -216,23 +216,84 @@ export class UI {
   }
 
   /* ------------------------------------------------------------ garage */
-  renderGarage() {
+  /** Garage: rebuild the car list (cards with rendered portraits) and the selected car's panel. */
+  renderGarage(animate = true) {
     const g = this.game;
-    const list = $('car-list');
+    const list = $('cl-cards');
+    list.classList.toggle('still', !animate);
+    const hadFocus = list.contains(document.activeElement);
+    const filter = this.garageFilter || 'all';
+    g.thumbs?.cancel();
     list.innerHTML = '';
-    for (const car of PLAYER_CARS) {
-      const un = g.isUnlocked(car.id);
-      const cur = g.save.selectedCar === car.id;
-      const afford = g.econ.canAfford(car.cost);
-      const b = h('button', 'car-item' + (this.garageSel === car.id ? ' sel' : '') + (un ? '' : ' locked'),
-        `${limitSign(g.ratings(car, g.getCustom(car.id)).cls)}<div class="ci-txt"><div class="n">${car.name}</div><div class="k">${car.cls}</div></div><div class="tag ${cur ? 'cur' : un ? '' : afford ? 'buy' : 'price'}">${cur ? 'SELECTED' : un ? 'OWNED' : money(car.cost)}</div>`);
-      b.onclick = () => {
-        g.audio.click();
-        this.garageSel = car.id;
-        this.renderGarage();
-      };
-      list.appendChild(b);
-    }
+    const owned = PLAYER_CARS.filter((c) => g.isUnlocked(c.id)).length;
+    $('cl-owned').textContent = String(owned);
+    $('cl-total').textContent = String(PLAYER_CARS.length);
+    const bar = $('cl-bar');
+    bar.innerHTML = '';
+    for (const c of PLAYER_CARS) bar.appendChild(h('i', g.isUnlocked(c.id) ? 'on' : ''));
+    document.querySelectorAll('#cl-filter button').forEach((f) => {
+      f.classList.toggle('sel', f.dataset.f === filter);
+      f.setAttribute('aria-pressed', String(f.dataset.f === filter));
+      f.onclick = () => { if (this.garageFilter === f.dataset.f) return; g.audio.click(); this.garageFilter = f.dataset.f; this.renderGarage(); };
+    });
+    const shown = PLAYER_CARS.filter((c) => filter === 'all' || (filter === 'owned') === g.isUnlocked(c.id));
+    if (!shown.length) list.appendChild(h('p', 'cl-empty', 'Every car is already in your garage.'));
+    shown.forEach((car, i) => list.appendChild(this._carCard(car, i)));
+    this._garageInfo();
+    this._scrollToSel(false);
+    if (hadFocus) list.querySelector('.car-card.sel')?.focus({ preventScroll: true });
+  }
+
+  _carCard(car, i) {
+    const g = this.game;
+    const un = g.isUnlocked(car.id);
+    const cur = g.save.selectedCar === car.id;
+    const afford = g.econ.canAfford(car.cost);
+    const cu = g.getCustom(car.id);
+    const rt = g.ratings(car, cu);
+    const b = h('button', 'car-card' + (this.garageSel === car.id ? ' sel' : '') + (un ? '' : ' locked') + (!un && afford ? ' afford' : '') + (cur ? ' cur' : ''));
+    b.dataset.car = car.id;
+    b.style.setProperty('--paint', cu.color || '#8a929c');
+    b.style.setProperty('--i', String(i));
+    const status = cur ? 'Driving' : un ? 'Owned' : money(car.cost);
+    b.setAttribute('aria-label', `${car.name}, ${rt.cls.name}, pace ${rt.pace}, ${status}`);
+    b.innerHTML = '<span class="cc-glow"></span><img class="cc-img" alt="">'
+      + `<span class="cc-txt"><span class="cc-name">${car.name}</span><span class="cc-sub">${car.cls}</span>`
+      + `<span class="cc-foot">${limitSign(rt.cls)}<b class="cc-pace">${rt.pace}</b>`
+      + `<span class="cc-tag">${!un && !afford ? '<svg class="cc-lock" viewBox="0 0 12 14" aria-hidden="true"><rect x="1.5" y="6" width="9" height="7" rx="1.5" fill="currentColor"/><path d="M3.5 6V4.5a2.5 2.5 0 015 0V6" fill="none" stroke="currentColor" stroke-width="1.6"/></svg>' : ''}${status}</span></span></span>`;
+    const img = b.querySelector('img');
+    const show = (url) => { img.src = url; img.classList.add('ready'); };
+    const url = g.thumbs?.request(car, cu, cu.plate || g.S.plate, (u) => { if (img.isConnected) show(u); }, this.garageSel === car.id);
+    if (url) { img.src = url; img.classList.add('ready', 'instant'); }
+    b.onclick = () => { if (this.garageSel !== car.id) { g.audio.click(); this._garagePick(car.id); } };
+    // gamepad / keyboard: moving the highlight onto a car shows it
+    b.onfocus = () => { if (b.matches(':focus-visible') && this.garageSel !== car.id) this._garagePick(car.id); };
+    return b;
+  }
+
+  /** Show another car without rebuilding the list. */
+  _garagePick(id) {
+    this.garageSel = id;
+    document.querySelectorAll('#cl-cards .car-card').forEach((c) => c.classList.toggle('sel', c.dataset.car === id));
+    this._garageInfo();
+    this._scrollToSel(true);
+  }
+
+  /** Keep the car on show in view in the list (after the card has grown). */
+  _scrollToSel(smooth) {
+    const list = $('cl-cards');
+    const run = () => {
+      const c = list.querySelector('.car-card.sel');
+      if (!c) return;
+      const top = c.offsetTop - list.offsetTop, bot = top + 122;
+      if (top < list.scrollTop + 8) list.scrollTo({ top: Math.max(0, top - 8), behavior: smooth ? 'smooth' : 'auto' });
+      else if (bot > list.scrollTop + list.clientHeight - 34) list.scrollTo({ top: bot - list.clientHeight + 38, behavior: smooth ? 'smooth' : 'auto' });
+    };
+    if (smooth) setTimeout(run, 340); else run(); // after the cards have finished resizing
+  }
+
+  _garageInfo() {
+    const g = this.game;
     const car = CAR_BY_ID[this.garageSel];
     g.showGarageCar(car.id);
     $('ci-maker').textContent = car.maker;
@@ -263,7 +324,7 @@ export class UI {
     const afford = g.econ.canAfford(car.cost);
     const sel = $('btn-select');
     sel.disabled = !un && !afford;
-    sel.textContent = g.save.selectedCar === car.id ? 'SELECTED' : un ? 'SELECT' : `BUY · ${money(car.cost)}`;
+    sel.textContent = g.save.selectedCar === car.id ? 'DRIVING' : un ? 'DRIVE THIS CAR' : `BUY · ${money(car.cost)}`;
     $('btn-tocustom').classList.toggle('hidden', !un);
     $('g-cash').textContent = money(g.econ.cash);
     const lock = $('ci-lock');
@@ -293,8 +354,8 @@ export class UI {
     g.save.selectedCar = this.garageSel;
     g.saveNow();
     g.onCarChanged();
-    this.renderGarage();
-    this.toast(`${CAR_BY_ID[this.garageSel].name} selected`, 'good');
+    this.renderGarage(false);
+    this.toast(`Now driving the ${CAR_BY_ID[this.garageSel].name}`, 'good');
   }
 
   /* ------------------------------------------------------------ challenges */

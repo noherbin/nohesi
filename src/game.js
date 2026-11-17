@@ -19,6 +19,7 @@ import { Scoring } from './gameplay/scoring.js';
 import { wallCollision, trafficCollisions } from './gameplay/collisions.js';
 import { Autopilot } from './gameplay/autopilot.js';
 import { GarageScene } from './garage/garageScene.js';
+import { CarThumbs } from './garage/carThumbs.js';
 import { UI, MODES } from './ui/ui.js';
 import { Leaderboard } from './gameplay/leaderboard.js';
 import { Economy, money } from './gameplay/economy.js';
@@ -112,6 +113,7 @@ export class Game {
     this.spray = new Particles(this.scene, 520, { texture: radialTexture(64, 0.0, 1.0), depthBias: 0.5 });
     this.postfx = new PostFX(renderer, this.scene, this.camera);
     this.garage = new GarageScene(renderer);
+    this.thumbs = new CarThumbs(renderer, this.garage.env);
     this.scoring = new Scoring();
     this.autopilot = new Autopilot();
     ui.setLoading(0.65, 'Lighting the sky…');
@@ -1178,6 +1180,8 @@ export class Game {
     }
     this.renderer.toneMappingExposure = 0.9;
     this.renderer.setRenderTarget(null);
+    // car portraits for the garage list, one per frame, drawn before (and then under) the frame itself
+    if (this.ui.screen === 'garage' && this.thumbs.busy) this.thumbs.pump();
     g.render(this.renderer);
   }
 }
