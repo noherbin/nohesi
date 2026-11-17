@@ -3,6 +3,7 @@ import * as THREE from 'three';
 import { Sky } from 'three/examples/jsm/objects/Sky.js';
 import { lerp, clamp, smoothstep } from '../core/utils.js';
 import * as T from './textures.js';
+import { latticeTowerGeometry } from './tokyo.js';
 
 // Lighting keyframes by sun elevation (degrees)
 const KEYS = [
@@ -309,6 +310,19 @@ export class SkySystem {
     this.mountains.visible = env.mountains.height > 0;
     this.envGround.material.color.setHex(env.terrain.far).multiplyScalar(0.6);
     this._envKey = '';
+    // Tokyo: a red-and-white lattice broadcast tower stands on the skyline (drawn far away, like the skyline)
+    if (env.style === 'shutoko' && !this.landmark) {
+      const tg = latticeTowerGeometry();
+      const mk = (geo, hex) => { const m = new THREE.Mesh(geo, new THREE.MeshBasicMaterial({ color: hex, fog: false })); m.userData.base = new THREE.Color(hex); m.frustumCulled = false; return m; };
+      this.landmark = new THREE.Group();
+      this.landmark.add(mk(tg.red, 0xc8362a), mk(tg.white, 0xe6e2da), mk(tg.deck, 0xd8d6d0));
+      this.landmarkLights = new THREE.Mesh(new THREE.SphereGeometry(2.2, 8, 6), new THREE.MeshBasicMaterial({ color: 0xff2a1a, fog: false }));
+      this.landmarkLights.position.y = tg.height + 2;
+      this.landmark.add(this.landmarkLights);
+      this.landmark.renderOrder = -3;
+      this.scene.add(this.landmark);
+    }
+    if (this.landmark) this.landmark.visible = env.style === 'shutoko';
   }
 
   setTime(hours, cycle) {
@@ -467,6 +481,27 @@ export class SkySystem {
     cu.offset.value.copy(this.cloudOffset);
     this.mountains.position.set(camPos.x, refY + 120 + 260 - 40, camPos.z);
     this.skyline.position.set(camPos.x, refY + 210 - 25, camPos.z);
+    if (this.landmark?.visible) {
+      // 2.6 km out, a little right of the road ahead (its bearing drifts slowly after the road, so it keeps
+      // turning up at the end of the corridor); red and white by day, hazed by the air, lit orange at night
+      const want = (this.roadHeading ?? 0) + 0.2;
+      if (this.lmAz === undefined || dt === 0) this.lmAz = want;
+      let dA = ((want - this.lmAz + Math.PI * 3) % (Math.PI * 2)) - Math.PI;
+      this.lmAz += dA * Math.min(1, dt * 0.06);
+      const az = this.lmAz;
+      this.landmark.position.set(camPos.x + Math.sin(az) * 2600, refY - 60, camPos.z - Math.cos(az) * 2600);
+      const day = 1 - this.night;
+      const amb = lerp(0.15, 1, day) * (1 - oc * 0.35);
+      const glow = new THREE.Color(0xff8a3a);
+      for (const m of this.landmark.children) {
+        if (!m.userData.base) continue;
+        const c = m.material.color.copy(m.userData.base).multiplyScalar(amb);
+        if (m.userData.base.r > 0.8 && m.userData.base.g < 0.4) c.lerp(glow.clone().multiplyScalar(1.15), this.night * 0.85);
+        else c.lerp(new THREE.Color(0xffb070), this.night * 0.7);
+        c.lerp(fog, lerp(0.42, 0.25, this.night) + oc * 0.3);
+      }
+      this.landmarkLights.material.color.setRGB(1, 0.16, 0.1).multiplyScalar(this.night * (performance.now() % 1500 < 800 ? 2 : 0.3) + 0.2);
+    }
 
     // Environment map refresh when lighting changed noticeably
     const key = `${Math.round(this.hours * 4)}|${Math.round(oc * 10)}|${env?.id}`;

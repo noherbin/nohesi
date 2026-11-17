@@ -80,6 +80,16 @@ export class Traffic {
   }
 
   /* ------------------------------------------------------------ setup */
+  /** Number plate style for every traffic car ('ca' California, 'jp' Japanese). */
+  setPlate(style) {
+    if (this._plateStyle === style) return;
+    this._plateStyle = style;
+    const m = this.mats.plate;
+    m.map?.dispose();
+    m.map = plateTexture(style === 'jp' ? '29-15' : '8NHS204', style);
+    m.needsUpdate = true;
+  }
+
   reset(layout, density, playerS, playerLane, opts = {}) {
     for (const c of [...this.cars, ...this.opp]) this._release(c);
     this.cars.length = 0;

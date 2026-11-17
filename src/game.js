@@ -331,6 +331,7 @@ export class Game {
     if (envChanged) {
       this.highway.setEnvironment(env, this.layout, Q);
       this.sky.setEnvironment(env);
+      this.traffic.setPlate(env.plate || 'ca');
     } else this.highway.clear();
     const td = TIMES.find((t) => t.id === cfg.time) || TIMES[0];
     const hours = td.id === 'default' ? env.defaultTime : td.h;
@@ -932,9 +933,23 @@ export class Game {
     const playing = this.state === 'playing' || this.state === 'paused' || this.state === 'results';
     this.camRig.update(dt || 1e-4, { car, road: this.road, origin: this.origin, settings: this.S, lookBack: playing && this.input.isHeld('lookBack'), layout: this.layout, traffic: this.traffic });
     const cam = this.camera;
+    sky.roadHeading = car.proj.H;
     sky.update(dt, cam.position, car.proj.E);
     sky.updateShadow(car.model.root.position);
     const night = sky.night, wet = sky.wet;
+    // inside a tunnel the sky's light falls away and the eye adapts; under a double deck it is shaded
+    if (this.highway.tokyo) {
+      const cv = this.highway.coverAt(this.road.project(cam.position.x + this.origin.x, -cam.position.z + this.origin.y, car.proj.s, this._camProj || (this._camProj = {})).s);
+      const t = cv.c?.kind === 'tunnel' ? cv.k : 0, st = cv.c?.kind === 'stack' ? cv.k : 0;
+      this._coverK = damp(this._coverK || 0, t, 6, dt || 0.016);
+      this._stackK = damp(this._stackK || 0, st, 6, dt || 0.016);
+      const ct = this._coverK, cs = this._stackK;
+      sky.sun.intensity *= 1 - 0.94 * ct - 0.3 * cs;
+      // the city's glow lifts the night: lit walls and road read the way they do on the real expressway
+      sky.hemi.intensity *= (1 - 0.78 * ct - 0.15 * cs) * (1 + 0.85 * night * (1 - ct));
+      this.scene.environmentIntensity *= 1 - 0.65 * ct - 0.15 * cs;
+      sky.exposure *= 1 + 0.3 * ct * (1 - night);
+    }
     if (dt > 0) this.traffic.render(this.origin, night, wet);
     this.highway.setAmbient(night, wet);
     this.highway.updateLampLights(P.X, P.Y);

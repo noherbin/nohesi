@@ -8,6 +8,7 @@ import {
 } from './props.js';
 import { mulberry32, hash3, fbm2, noise2, clamp, lerp, smoothstep } from '../core/utils.js';
 import * as DT from './details.js';
+import * as TK from './tokyo.js';
 
 export const CL = 64; // chunk length (m)
 const ROWS = CL / DS;
@@ -57,9 +58,11 @@ export class Highway {
     if (!lights.length) return;
     const pick = this._lampPick;
     pick.length = 0;
-    if (lit > 0 && this.env?.lights.spacing > 0) {
+    if ((lit > 0 && this.env?.lights.spacing > 0) || this.tokyo) {
       for (const ch of this.chunks.values()) {
         for (const l of ch.lamps) {
+          // tunnel and under-deck lamps (flagged 1) are on day and night
+          if (lit <= 0 && l[3] !== 1) continue;
           const d2 = (l[0] - X) ** 2 + (l[1] - Y) ** 2;
           if (d2 > 70 * 70) continue;
           pick.push([d2, l]);
@@ -75,7 +78,7 @@ export class Highway {
       const l = p[1];
       // fade with distance so a light swapping to a new lamp happens where it is already dark
       const d = Math.sqrt(p[0]);
-      L.intensity = 75 * lit * (1 - smoothstep(30, 52, d)) * (1 + this.wet * 0.15);
+      L.intensity = (this.tokyo ? 58 : 75) * (l[3] === 1 ? Math.max(lit, 0.9) : lit) * (1 - smoothstep(30, 52, d)) * (1 + this.wet * 0.15);
       L.color.copy(this.lampColor);
       L.position.set(l[0] - ox, l[2] - 0.35, -(l[1] - oy));
       L.target.position.set(L.position.x, l[2] - 10, L.position.z);
@@ -100,6 +103,26 @@ export class Highway {
     this._featRng = rng;
     this._nextGantry = 260 + rng() * 200;
     this._nextOverpass = 520 + rng() * 300;
+    // covered stretches (tunnels, double decks), kept clear of the spawn straight
+    this.covers = [];
+    this._nextCover = env.tunnels ? 700 + rng() * 500 : Infinity;
+  }
+
+  /** Is road distance s inside a tunnel or under a double deck? { kind, k } with k easing 0..1 over the portals. */
+  coverAt(s) {
+    for (const c of this.covers || []) {
+      if (s < c.s0 - 30 || s > c.s1 + 30) continue;
+      const k = smoothstep(c.s0 - 30, c.s0 + 12, s) * (1 - smoothstep(c.s1 - 12, c.s1 + 30, s));
+      if (s >= c.s0 && s <= c.s1) return { kind: c.kind, k, c };
+      return { kind: null, k, near: c.kind, c };
+    }
+    return { kind: null, k: 0 };
+  }
+
+  /** Inside a cover's span (with margin m)? */
+  _inCover(s, m = 0) {
+    for (const c of this.covers || []) if (s > c.s0 - m && s < c.s1 + m) return c;
+    return null;
   }
 
   _buildColumns() {
@@ -160,11 +183,34 @@ export class Highway {
       rpm: new THREE.MeshBasicMaterial({ vertexColors: true, toneMapped: false, side: THREE.DoubleSide, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -4 }),
     };
     this.mat.marking.emissive.set(0x000000);
+    this.tokyo = env.style === 'shutoko';
+    if (this.tokyo) this._buildTokyoMaterials();
     // Gantry sign faces
-    this.signMats = env.signs.map(([d, r, dir], i) =>
-      new THREE.MeshStandardMaterial({ map: T.signTexture(d, r, dir, i + env.seed), roughness: 0.45, metalness: 0.0, emissive: 0xffffff, emissiveIntensity: 0 }));
+    this.signMats = env.signs.map((sg, i) =>
+      new THREE.MeshStandardMaterial({ map: Array.isArray(sg) ? T.signTexture(sg[0], sg[1], sg[2], i + env.seed) : TK.jpSignTexture(sg, i + env.seed), roughness: 0.45, metalness: 0.0, emissive: 0xffffff, emissiveIntensity: 0 }));
     for (const m of this.signMats) { m.emissiveMap = m.map; }
     this.speedSignMat = new THREE.MeshStandardMaterial({ map: T.speedSignTexture(), roughness: 0.5 });
+  }
+
+  /** Tokyo expressway: light cast concrete, curve stripes, sound walls, tunnel lining, road paint, neon. */
+  _buildTokyoMaterials() {
+    const env = this.env;
+    const sc = TK.shutokoConcrete(env.seed + 11), st = TK.stripeTexture(), tt = TK.tunnelTexture(), rp = TK.roadPaintTexture(), na = TK.neonAtlas(env.seed + 5);
+    this.textures.push(sc, st, tt, rp, na);
+    this.mat.concrete.map = sc;
+    this.mat.wall.map = sc;
+    this.mat.wall.roughness = 0.88;
+    this.mat.soffit = new THREE.MeshStandardMaterial({ map: sc, color: 0x8d8f90, roughness: 0.95, side: THREE.DoubleSide });
+    this.mat.stripe = new THREE.MeshStandardMaterial({ map: st, roughness: 0.62, side: THREE.DoubleSide, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -4 });
+    this.mat.sound = new THREE.MeshStandardMaterial({ color: 0x8fa6b2, roughness: 0.1, metalness: 0.25, transparent: true, opacity: 0.34, depthWrite: false, side: THREE.DoubleSide, envMapIntensity: 1.4 });
+    this.mat.tunnel = new THREE.MeshStandardMaterial({ map: tt, roughness: 0.55 });
+    this.mat.tunnelLight = new THREE.MeshBasicMaterial({ color: new THREE.Color(0xfff2dc).multiplyScalar(1.6), toneMapped: false, side: THREE.DoubleSide });
+    const tn = TK.tunnelNameTexture();
+    this.textures.push(tn);
+    this.mat.tunnelName = new THREE.MeshBasicMaterial({ map: tn, color: 0xd8dde4, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -4 });
+    this.mat.roadPaint = new THREE.MeshStandardMaterial({ map: rp, transparent: true, depthWrite: false, roughness: 0.55, emissive: 0xffffff, emissiveMap: rp, emissiveIntensity: 0, polygonOffset: true, polygonOffsetFactor: -3, polygonOffsetUnits: -6 });
+    this.mat.neon = new THREE.MeshStandardMaterial({ map: na, emissiveMap: na, emissive: 0xffffff, emissiveIntensity: 0.3, roughness: 0.5 });
+    this.mat.ceilLamp = new THREE.MeshBasicMaterial({ color: new THREE.Color(env.lights.color).multiplyScalar(0.3), toneMapped: false });
   }
 
   _buildPools() {
@@ -174,7 +220,7 @@ export class Highway {
     const lampColor = new THREE.Color(env.lights.color);
     this.lampColor = lampColor;
     // Streetlights
-    const sl = streetlightGeometry(env.lights.style);
+    const sl = env.lights.style === 'jp' ? TK.jpLampGeometry() : streetlightGeometry(env.lights.style);
     this.lampLocal = sl.lampPos;
     this.lampMat = new THREE.MeshBasicMaterial({ color: lampColor.clone().multiplyScalar(0.25), toneMapped: false });
     const lightParts = [
@@ -182,7 +228,7 @@ export class Highway {
       { geometry: sl.lamp, material: this.lampMat },
     ];
     if (sl.base) lightParts.push({ geometry: sl.base, material: this.mat.concrete, castShadow: shadows, receiveShadow: true });
-    P.light = new PropPool(scene, lightParts, 64);
+    P.light = new PropPool(scene, lightParts, this.tokyo ? 150 : 64);
     // Light pools on road surface
     this.poolTex = T.radialTexture(128, 0.0, 1.3);
     this.textures.push(this.poolTex);
@@ -191,7 +237,7 @@ export class Highway {
       blending: THREE.AdditiveBlending, polygonOffset: true, polygonOffsetFactor: -4, polygonOffsetUnits: -8,
     });
     const poolGeo = new THREE.PlaneGeometry(1, 1).rotateX(-Math.PI / 2);
-    P.lightPool = new PropPool(scene, [{ geometry: poolGeo, material: this.poolMat }], 140);
+    P.lightPool = new PropPool(scene, [{ geometry: poolGeo, material: this.poolMat }], this.tokyo ? 170 : 140);
     // Vegetation
     const palm = palmGeometry(env.seed);
     this.mat.palmTrunk = new THREE.MeshStandardMaterial({ color: 0x7a6650, roughness: 1 });
@@ -218,6 +264,7 @@ export class Highway {
     const protos = {
       low: [26, 9, 18, 4, 5], warehouse: [44, 11, 30, 3, 6], mid: [22, 34, 22, 16, 8],
       tower: [28, 80, 28, 16, 8], tall: [32, 150, 32, 16, 8], glass: [30, 110, 26, 16, 8],
+      office: [26, 48, 22, 12, 8], pencil: [10, 40, 10, 12, 3],
     };
     this.buildingPools = {};
     this.buildingVariants = {};
@@ -315,9 +362,25 @@ export class Highway {
     ], 12);
     // Viaduct piers (elevated)
     P.pier = new PropPool(scene, [{ geometry: new THREE.BoxGeometry(2.2, 1, 1.6).translate(0, -0.5, 0), material: this.mat.concrete }], 120);
+    if (this.tokyo) {
+      // T-shaped piers: one column under each carriageway carrying a cap beam (scaled to the deck height)
+      const L = this.layout, half = L.roadEdge - L.laneStart + 1.4;
+      const tp = new THREE.CylinderGeometry(1.3, 1.45, 1, 16).translate(0, -0.5, 0);
+      P.tpier = new PropPool(scene, [{ geometry: tp, material: this.mat.concrete, castShadow: false }], 160);
+      // cap beams (fixed size) sit on top of the columns
+      P.tcap = new PropPool(scene, [{ geometry: new THREE.BoxGeometry(half, 1.8, 2.6).translate(0, -0.9, 0), material: this.mat.concrete }], 160);
+      // pools of light on the lanes in tunnels and under double decks (lit day and night)
+      this.tunnelPoolMat = new THREE.MeshBasicMaterial({ map: this.poolTex, color: lampColor, transparent: true, opacity: 0.34, depthWrite: false, blending: THREE.AdditiveBlending, polygonOffset: true, polygonOffsetFactor: -4, polygonOffsetUnits: -8 });
+      P.tunnelPool = new PropPool(scene, [{ geometry: new THREE.PlaneGeometry(1, 1).rotateX(-Math.PI / 2), material: this.tunnelPoolMat }], 160);
+      // ceiling lamps under double-deck sections
+      P.ceilLamp = new PropPool(scene, [
+        { geometry: new THREE.BoxGeometry(1.4, 0.18, 0.5).translate(0, -0.09, 0), material: this.mat.steel },
+        { geometry: new THREE.BoxGeometry(1.25, 0.04, 0.38).translate(0, -0.2, 0), material: this.mat.ceilLamp },
+      ], 220);
+    }
     // Large unique objects
-    this.gantryPool = new ObjectPool(() => this._makeGantry());
-    this.overpassPool = new ObjectPool(() => this._makeOverpass());
+    this.gantryPool = new ObjectPool(() => (this.tokyo ? this._makeGantryJP() : this._makeGantry()));
+    this.overpassPool = new ObjectPool(() => (this.tokyo ? this._makeViaduct() : this._makeOverpass()));
   }
 
   _makeGantry() {
@@ -353,6 +416,92 @@ export class Highway {
       back.castShadow = this.castPropShadows;
       g.add(holder);
       g.userData.signs.push({ holder, face });
+    }
+    this.group.add(g);
+    return g;
+  }
+
+  /**
+   * Japanese overhead sign structure: a box-girder beam from the median to a leg outside the wall, two
+   * green boards hung on its face, and a row of sign lamps on arms above them.
+   */
+  _makeGantryJP() {
+    const L = this.layout;
+    const g = new THREE.Group();
+    const H = 7.4;
+    const x0 = 0.55, x1 = L.wallD + 0.7;
+    const span = x1 - x0, cx = (x0 + x1) / 2;
+    const parts = [];
+    parts.push(new THREE.BoxGeometry(0.55, H + 1.0, 0.55).translate(x0, (H + 1.0) / 2, 0));
+    parts.push(new THREE.BoxGeometry(0.6, H + 1.0 + 2.6, 0.6).translate(x1, (H + 1.0 - 2.6) / 2, 0));
+    parts.push(new THREE.BoxGeometry(span + 0.6, 1.25, 0.9).translate(cx, H + 0.55, 0));
+    // lamp arms over the boards
+    const lampGeo = [];
+    for (let x = x0 + 1.2; x < x1 - 0.8; x += 1.9) {
+      parts.push(new THREE.BoxGeometry(0.08, 0.08, 1.3).translate(x, H + 1.25, 0.65));
+      parts.push(new THREE.BoxGeometry(0.5, 0.16, 0.3).translate(x, H + 1.22, 1.25));
+      lampGeo.push(new THREE.BoxGeometry(0.42, 0.03, 0.22).translate(x, H + 1.13, 1.25));
+    }
+    const frame = new THREE.Mesh(merge(parts), this.mat.steel);
+    frame.castShadow = this.castPropShadows;
+    g.add(frame, new THREE.Mesh(merge(lampGeo), this.lampMat));
+    g.userData.signs = [];
+    for (let i = 0; i < 3; i++) {
+      const face = new THREE.Mesh(new THREE.PlaneGeometry(5.4, 3.04), this.signMats[0]);
+      const back = new THREE.Mesh(new THREE.BoxGeometry(5.5, 3.14, 0.12), this.mat.signBack);
+      back.position.z = -0.1;
+      const holder = new THREE.Group();
+      holder.add(face, back);
+      holder.position.set(0, H - 1.0, 0.6);
+      back.castShadow = this.castPropShadows;
+      g.add(holder);
+      g.userData.signs.push({ holder, face });
+    }
+    this.group.add(g);
+    return g;
+  }
+
+  /**
+   * Crossing expressway: a deck with parapets and lamps on T-piers, crossing overhead (often at a skew).
+   * Piers are separate meshes so the ones that would land on our road can be hidden per placement.
+   */
+  _makeViaduct() {
+    const g = new THREE.Group();
+    const half = 125, Hv = 10.6, W = 19;
+    const conc = this.mat.concrete;
+    const deck = [];
+    deck.push(new THREE.BoxGeometry(half * 2, 2.3, W).translate(0, Hv + 1.15, 0));
+    deck.push(new THREE.BoxGeometry(half * 2, 0.8, W - 5).translate(0, Hv - 0.4, 0));
+    for (const z of [W / 2 - 0.22, -(W / 2 - 0.22)]) deck.push(new THREE.BoxGeometry(half * 2, 1.3, 0.44).translate(0, Hv + 2.95, z));
+    const dm = new THREE.Mesh(merge(deck), conc);
+    dm.castShadow = true;
+    dm.receiveShadow = true;
+    g.add(dm);
+    const st = [];
+    for (const z of [W / 2 + 0.005, -(W / 2 + 0.005)]) st.push(new THREE.PlaneGeometry(half * 2, 0.9).rotateY(z > 0 ? 0 : Math.PI).translate(0, Hv + 1.3, z));
+    g.add(new THREE.Mesh(merge(st), this.mat.soffit));
+    // lamps along both parapets of the upper road
+    const lamps = [], poles = [];
+    for (let x = -half + 12; x < half; x += 28) {
+      for (const z of [W / 2 - 0.25, -(W / 2 - 0.25)]) {
+        poles.push(new THREE.CylinderGeometry(0.08, 0.11, 7, 6).translate(x, Hv + 3.6 + 3.5, z));
+        poles.push(new THREE.BoxGeometry(0.4, 0.14, 2.2).translate(x, Hv + 10.6, z - Math.sign(z) * 1.1));
+        lamps.push(new THREE.BoxGeometry(0.34, 0.04, 1.0).translate(x, Hv + 10.5, z - Math.sign(z) * 1.6));
+      }
+    }
+    g.add(new THREE.Mesh(merge(poles), this.mat.steel), new THREE.Mesh(merge(lamps), this.lampMat));
+    // T-piers every 30 m along the deck
+    g.userData.piers = [];
+    for (let x = -half + 10; x <= half - 10; x += 30) {
+      const pg = merge([
+        new THREE.CylinderGeometry(1.35, 1.5, Hv + 40, 16).translate(0, (Hv - 40) / 2 - 0.9, 0),
+        new THREE.BoxGeometry(3.2, 1.8, W - 3).translate(0, Hv - 1.2, 0),
+      ]);
+      const pm = new THREE.Mesh(pg, conc);
+      pm.position.x = x;
+      pm.castShadow = this.castPropShadows;
+      g.add(pm);
+      g.userData.piers.push({ mesh: pm, x });
     }
     this.group.add(g);
     return g;
@@ -400,15 +549,34 @@ export class Highway {
   /* ---------------------------------------------------------------- chunks */
   _ensureFeatures(sMax) {
     const env = this.env, rng = this._featRng;
+    while (this._nextCover < sMax + 600) {
+      const tunnel = rng() < 0.45;
+      const cfg = tunnel ? env.tunnels : env.stacks;
+      const len = lerp(cfg.len[0], cfg.len[1], rng());
+      this.covers.push({ s0: this._nextCover, s1: this._nextCover + len, kind: tunnel ? 'tunnel' : 'stack', seed: Math.floor(rng() * 1e9) });
+      const nx = tunnel ? env.stacks : env.tunnels;
+      this._nextCover += len + lerp(Math.min(cfg.gap[0], nx.gap[0]), Math.max(cfg.gap[1], nx.gap[1]) * 0.7, rng());
+    }
+    while (this.covers.length && this.covers[0].s1 < (this._sMinKeep ?? 0) - 800) this.covers.shift();
+    // gantries and crossing viaducts stay out of covered stretches
+    const push = (m, after = 70) => { const c = this._inCover(m, 60); return c ? c.s1 + after : m; };
+    this._nextGantry = push(this._nextGantry);
+    this._nextOverpass = push(this._nextOverpass, 230);
     while (this._nextGantry < sMax || this._nextOverpass < sMax) {
       if (this._nextGantry <= this._nextOverpass) {
+        // a sign gantry right under a crossing deck would hide its boards
+        if (this.features.some((f) => f.type === 'overpass' && Math.abs(f.s - this._nextGantry) < 110) || Math.abs(this._nextOverpass - this._nextGantry) < 110) {
+          this._nextGantry = push(Math.max(this._nextGantry, this._nextOverpass) + 120);
+          continue;
+        }
         this.features.push({ s: this._nextGantry, type: 'gantry', seed: Math.floor(rng() * 1e9) });
-        this._nextGantry += lerp(env.gantry[0], env.gantry[1], rng());
+        this._nextGantry = push(this._nextGantry + lerp(env.gantry[0], env.gantry[1], rng()));
       } else {
         // keep overpasses clear of gantries
         if (Math.abs(this._nextOverpass - this._nextGantry) < 160) this._nextOverpass = this._nextGantry + 200;
+        if (this._inCover(this._nextOverpass, 60)) { this._nextOverpass = push(this._nextOverpass, 230); continue; }
         this.features.push({ s: this._nextOverpass, type: 'overpass', seed: Math.floor(rng() * 1e9) });
-        this._nextOverpass += lerp(env.overpass[0], env.overpass[1], rng());
+        this._nextOverpass = push(this._nextOverpass + lerp(env.overpass[0], env.overpass[1], rng()), 230);
       }
     }
     this.features.sort((a, b) => a.s - b.s);
@@ -500,7 +668,8 @@ export class Highway {
       for (let r = 0; r <= ROWS; r++) {
         const row = rows[r];
         // subtle along-road wear variation
-        const wear = 1 + 0.035 * noise2(row.s * 0.02, 0, 77);
+        let wear = 1 + 0.035 * noise2(row.s * 0.02, 0, 77);
+        if (this.tokyo) { const cv = this.coverAt(row.s); if (cv.k > 0) wear *= 1 - (cv.c.kind === 'tunnel' ? 0.42 : 0.16) * cv.k; }
         for (let c = 0; c < nc; c++) {
           const i = r * nc + c;
           toLocal(row, cols[c][0], 0, pos, i * 3);
@@ -534,19 +703,25 @@ export class Highway {
         idx.push(base, base + 1, base + 2, base + 1, base + 3, base + 2);
       };
       const oppEnd = L.laneStart + L.oppLanes * L.LW;
-      const solid = [[L.laneStart + 0.12, Y], [L.lanesEnd - 0.12, W], [-L.laneStart - 0.12, Y], [-oppEnd + 0.12, W]];
+      // Japan: white edge lines on both sides; yellow lane lines where lane changes are banned
+      const edge = this.tokyo ? W : Y;
+      const solid = [[L.laneStart + 0.12, edge], [L.lanesEnd - 0.12, W], [-L.laneStart - 0.12, edge], [-oppEnd + 0.12, W]];
       for (const [d, c] of solid) {
         for (let r = 0; r < ROWS; r++) quad(rows[r].s, rows[r + 1].s, d, 0.15, c);
       }
       const dashD = [];
       for (let i = 1; i < L.n; i++) dashD.push(L.laneStart + i * L.LW);
       for (let i = 1; i < L.oppLanes; i++) dashD.push(-(L.laneStart + i * L.LW));
+      const noChange = (sv) => this.tokyo && noise2(sv * 0.0045, 3.7, 19) > 0.42;
+      const YL = [0.95, 0.68, 0.1];
+      if (this.tokyo) for (let r = 0; r < ROWS; r++) if (noChange(rows[r].s)) for (const d of dashD) quad(rows[r].s, rows[r + 1].s, d, 0.15, YL);
       const j0 = Math.ceil((s0 - 3) / 12), j1 = Math.floor((s0 + CL) / 12);
       for (let j = j0; j <= j1; j++) {
         const a = Math.max(s0, j * 12), b = Math.min(s0 + CL, j * 12 + 3);
-        if (b - a < 0.05) continue;
+        if (b - a < 0.05 || noChange(a)) continue;
         for (const d of dashD) quad(a, b, d, 0.13, W);
       }
+      if (this.tokyo) this._roadPaint(ch, s0, toLocal);
       ch.meshes.push(this._mesh(new Float32Array(verts), null, new Float32Array(cols), idx, this.mat.marking, { receive: true }));
       // surface wear: skid marks, sealed cracks, patch repairs and oil drips
       {
@@ -692,6 +867,11 @@ export class Highway {
       if (ai.length) ch.meshes.push(this._mesh(new Float32Array(av), new Float32Array(au), null, ai, this.mat.wallArt, { receive: true }));
     }
     const outerProfile = () => {
+      if (env.outer === 'shutoko') {
+        // tall cast parapet with a kerb, a crisp rounded top, and the deck edge below it
+        const H = env.wallHeight;
+        return [[-0.32, 0], [-0.3, 0.12], [-0.24, 0.18], [-0.22, H], [-0.17, H + 0.06], [0.2, H + 0.06], [0.25, H], [0.27, -2.6], [-0.6, -2.6]];
+      }
       if (env.outer === 'wall') {
         const H = env.wallHeight;
         return [[-0.3, 0], [-0.29, 0.08], [-0.17, 0.33], [-0.1, 0.9], [-0.1, H], [0.12, H + 0.05], [0.25, H], [0.25, -1]];
@@ -702,6 +882,7 @@ export class Highway {
       return null;
     };
     const op = outerProfile();
+    if (this.tokyo) { this._tokyoWalls(ch, rows, toLocal, vBase); this._tokyoCovers(ch, rows, toLocal); }
     if (op) {
       profileMesh(op, L.wallD, false, env.outer === 'wall' ? this.mat.wall : this.mat.concrete);
       profileMesh(op, -L.wallD, true, env.outer === 'wall' ? this.mat.wall : this.mat.concrete);
@@ -762,7 +943,322 @@ export class Highway {
     this.group.add(ch.group);
 
     this._placeProps(ch, s0);
+    if (ch.signGeo?.length) {
+      const m = new THREE.Mesh(merge(ch.signGeo), this.mat.neon);
+      ch.meshes.push(m);
+      ch.group.add(m);
+      ch.signGeo = null;
+    }
     return ch;
+  }
+
+  /**
+   * Tokyo walls: red/white stripes on the outside of bends, translucent sound walls on long stretches,
+   * and the underside of the deck.
+   */
+  _tokyoWalls(ch, rows, toLocal, vBase) {
+    const L = this.layout, env = this.env, H = env.wallHeight;
+    const P0 = [0, 0, 0];
+    // curve stripes: band on the road face of the wall on the outside of the bend
+    {
+      const v = [], u = [], idx = [];
+      const kTh = 1 / 1500;
+      for (let r = 0; r < ROWS; r++) {
+        const a = rows[r], b = rows[r + 1];
+        const k = (a.K + b.K) / 2;
+        if (Math.abs(k) < kTh) continue;
+        // turning right (K > 0) puts the outside of the bend on the left
+        for (const side of k > 0 ? [-1] : [1]) {
+          const d = side * (L.wallD - 0.215);
+          const base = v.length / 3;
+          for (const [row, yy, vv] of [[a, 0.48, 0], [a, H - 0.04, 1], [b, 0.48, 0], [b, H - 0.04, 1]]) {
+            toLocal(row, d, yy, P0, 0);
+            v.push(P0[0], P0[1], P0[2]);
+            u.push(row.s / 3.2, vv);
+          }
+          if (side > 0) idx.push(base, base + 2, base + 1, base + 1, base + 2, base + 3);
+          else idx.push(base, base + 1, base + 2, base + 1, base + 3, base + 2);
+        }
+      }
+      if (idx.length) ch.meshes.push(this._mesh(new Float32Array(v), new Float32Array(u), null, idx, this.mat.stripe, { receive: true }));
+    }
+    // sound walls: long stretches of glazed panels on steel posts above the parapet
+    {
+      const v = [], u = [], idx = [], posts = [];
+      const top = H + 3.4;
+      for (const side of [1, -1]) {
+        const on = (row) => noise2(row.s * 0.0022, side * 5.3, 91) > 0.12 && !this.coverAt(row.s).kind;
+        for (let r = 0; r < ROWS; r++) {
+          const a = rows[r], b = rows[r + 1];
+          if (!on(a) || !on(b)) continue;
+          const d = side * (L.wallD + 0.02);
+          const base = v.length / 3;
+          for (const [row, yy, vv] of [[a, H + 0.06, 0], [a, top, 1], [b, H + 0.06, 0], [b, top, 1]]) {
+            toLocal(row, d, yy, P0, 0);
+            v.push(P0[0], P0[1], P0[2]);
+            u.push(row.s / 4, vv);
+          }
+          idx.push(base, base + 1, base + 2, base + 1, base + 3, base + 2);
+          if (Math.round(a.s) % 4 === 0) {
+            toLocal(a, d, (H + top) / 2, P0, 0);
+            posts.push(new THREE.BoxGeometry(0.16, top - H, 0.16).rotateY(-a.H).translate(P0[0], P0[1], P0[2]));
+            toLocal(a, d, top + 0.06, P0, 0);
+            posts.push(new THREE.BoxGeometry(0.2, 0.12, DS * 2 + 0.1).rotateY(-a.H).translate(P0[0], P0[1], P0[2]));
+          }
+        }
+      }
+      if (idx.length) {
+        const m = this._mesh(new Float32Array(v), new Float32Array(u), null, idx, this.mat.sound, {});
+        m.renderOrder = 2;
+        ch.meshes.push(m);
+      }
+      if (posts.length) ch.meshes.push(new THREE.Mesh(merge(posts), this.mat.steel));
+    }
+    // street level under the viaduct (the terrain strips start outside the walls)
+    {
+      const v = [], uvs = [], idx = [];
+      const g = this.groundOffset(rows[0].s, 0, 1);
+      for (let r = 0; r <= ROWS; r++) {
+        for (const d of [-(L.wallD + 0.4), L.wallD + 0.4]) { toLocal(rows[r], d, g, P0, 0); v.push(P0[0], P0[1], P0[2]); uvs.push(d / 10, rows[r].s / 10); }
+        if (r < ROWS) { const a = r * 2; idx.push(a, a + 1, a + 2, a + 1, a + 3, a + 2); }
+      }
+      const cols = new Float32Array(v.length).fill(0.55);
+      ch.meshes.push(this._mesh(new Float32Array(v), new Float32Array(uvs), cols, idx, this.mat.terrain, { receive: true }));
+    }
+    // deck underside, so the viaduct reads as a slab from the street and from crossing roads
+    {
+      const v = [], idx = [];
+      for (let r = 0; r <= ROWS; r++) {
+        for (const d of [-(L.wallD + 0.27), L.wallD + 0.27]) { toLocal(rows[r], d, -2.6, P0, 0); v.push(P0[0], P0[1], P0[2]); }
+        if (r < ROWS) { const a = r * 2; idx.push(a, a + 2, a + 1, a + 1, a + 2, a + 3); }
+      }
+      ch.meshes.push(this._mesh(new Float32Array(v), null, null, idx, this.mat.soffit, {}));
+    }
+  }
+
+  /**
+   * Shop and company signs on a Tokyo building facing the expressway: vertical tate-kanban sticking out of
+   * the facade (readable by approaching traffic) and boards on the roof. Collected per chunk into one mesh.
+   */
+  _shopSigns(ch, rng, kind, s, side, dist, bw, bd, ground, bh) {
+    const top = ground + bh; // building top relative to the road
+    if (top < 6) return;
+    const an = ch.anchor, Q = {};
+    const list = ch.signGeo || (ch.signGeo = []);
+    const cellUV = (g, faces, cell) => {
+      const uv = g.attributes.uv;
+      const cu = (cell % 4) * 0.25, cv = 1 - (Math.floor(cell / 4) + 1) * 0.25;
+      for (let f = 0; f < 6; f++) {
+        for (let i = f * 4; i < f * 4 + 4; i++) {
+          if (faces.includes(f)) uv.setXY(i, cu + 0.006 + uv.getX(i) * 0.238, cv + 0.006 + uv.getY(i) * 0.238);
+          else uv.setXY(i, cu + 0.002, cv + 0.002);
+        }
+      }
+    };
+    const place = (g, sAt, lat, h) => {
+      this.road.pos(sAt, lat, Q);
+      g.rotateY(-Q.H);
+      g.translate(Q.X - an.X, Q.E + h - an.E, -(Q.Y - an.Y));
+      list.push(g);
+    };
+    const face = dist - bw / 2; // the facade toward the road
+    // vertical signs, perpendicular to the facade (their faces look along the road)
+    const nv = kind === 'pencil' ? 1 : rng() < 0.7 ? 1 + (rng() < 0.4 ? 1 : 0) : 0;
+    for (let i = 0; i < nv; i++) {
+      const hgt = kind === 'pencil' ? Math.min(top - 2, 16 + rng() * 8) : 8 + rng() * 8;
+      const y0 = Math.max(ground + 4, -2 + rng() * 5);
+      if (y0 + hgt > top - 1) continue;
+      const g = new THREE.BoxGeometry(2.4, hgt, 0.5);
+      cellUV(g, [4, 5], Math.floor(rng() * 8));
+      place(g, s + (rng() - 0.5) * bd * 0.7, side * (face - 1.25), y0 + hgt / 2);
+    }
+    // rooftop board facing the road
+    if (rng() < (kind === 'pencil' ? 0.3 : 0.65) && top < 75) {
+      const len = Math.min(20, bd * 0.85), hh = 4 + rng() * 2.2;
+      const g = new THREE.BoxGeometry(0.4, hh, len);
+      cellUV(g, [0, 1], 8 + Math.floor(rng() * 8));
+      place(g, s + (rng() - 0.5) * (bd - len) * 0.5, side * (face + 1.5), top + 1.4 + hh / 2);
+      // steel frame under it
+      const fr = new THREE.BoxGeometry(0.3, 1.6, len * 0.9);
+      cellUV(fr, [], 0);
+      place(fr, s, side * (face + 1.5), top + 0.8);
+    }
+  }
+
+  /** Painted road text (速度落せ, 車間確認, speed numbers), stretched along the lane as in Japan. */
+  _roadPaint(ch, s0, toLocal) {
+    const L = this.layout, rng = mulberry32(this.env.seed * 4111 + ch.k * 7907);
+    if (rng() > 0.4) return;
+    const v = [], u = [], idx = [], P0 = [0, 0, 0], Q = {};
+    const n = 1 + (rng() < 0.4 ? 1 : 0);
+    const cell = Math.floor(rng() * 4);
+    const sa = s0 + 8 + rng() * (CL - 24);
+    const len = cell < 2 ? 9 : 6, w = 2.6;
+    const cu = (cell % 2) / 2, cv = 1 - (Math.floor(cell / 2) + 1) / 2;
+    for (let k = 0; k < n; k++) {
+      const opp = rng() < 0.35;
+      const lane = Math.floor(rng() * (opp ? L.oppLanes : L.n));
+      const d = (opp ? -1 : 1) * L.laneCenter(lane);
+      const segs = 6;
+      const base = v.length / 3;
+      for (let i = 0; i <= segs; i++) {
+        this.road.sample(sa + (i / segs) * len, Q);
+        for (const side of [-1, 1]) {
+          toLocal(Q, d + side * w / 2, 0.014, P0, 0);
+          v.push(P0[0], P0[1], P0[2]);
+          // reads from the near end for traffic in that lane (opposite lanes see it turned round)
+          const uu = opp ? (side < 0 ? 1 : 0) : (side < 0 ? 0 : 1);
+          const vv = opp ? 1 - i / segs : i / segs;
+          u.push(cu + uu * 0.5, cv + vv * 0.5);
+        }
+        if (i < segs) { const a = base + i * 2; idx.push(a, a + 1, a + 2, a + 1, a + 3, a + 2); }
+      }
+    }
+    const m = this._mesh(new Float32Array(v), new Float32Array(u), null, idx, this.mat.roadPaint, { receive: true });
+    m.renderOrder = 1;
+    ch.meshes.push(m);
+  }
+
+  /** Tunnels and double-deck sections that overlap this chunk. */
+  _tokyoCovers(ch, rows, toLocal) {
+    const s0 = rows[0].s, s1 = rows[ROWS].s;
+    for (const c of this.covers) {
+      if (c.s1 < s0 || c.s0 > s1) continue;
+      const r0 = Math.max(0, Math.floor((c.s0 - s0) / DS)), r1 = Math.min(ROWS, Math.ceil((c.s1 - s0) / DS));
+      if (r1 <= r0) continue;
+      if (c.kind === 'tunnel') this._tunnelGeo(ch, rows, toLocal, r0, r1, c);
+      else this._stackGeo(ch, rows, toLocal, r0, r1, c);
+    }
+  }
+
+  /**
+   * A surface swept along rows r0..r1 through a cross-section polyline [[d, h], ...]. uv: u runs along the
+   * road (uS per metre), v along the cross-section (vS per metre), unless `along` swaps them.
+   */
+  _sheet(ch, rows, toLocal, r0, r1, prof, mat, { uS = 0.25, vS = 0.25, flip = false, cast = false, vFit = false } = {}) {
+    const np = prof.length, n = r1 - r0 + 1;
+    const pos = new Float32Array(n * np * 3), uv = new Float32Array(n * np * 2), idx = [];
+    const plen = [0];
+    for (let p = 1; p < np; p++) plen.push(plen[p - 1] + Math.hypot(prof[p][0] - prof[p - 1][0], prof[p][1] - prof[p - 1][1]));
+    for (let r = r0; r <= r1; r++) {
+      const j = r - r0;
+      for (let p = 0; p < np; p++) {
+        const i = j * np + p;
+        toLocal(rows[r], prof[p][0], prof[p][1], pos, i * 3);
+        uv[i * 2] = rows[r].s * uS;
+        uv[i * 2 + 1] = vFit ? plen[p] / plen[np - 1] : plen[p] * vS;
+        if (j < n - 1 && p < np - 1) {
+          const a = i, b = i + 1, c = i + np, d = i + np + 1;
+          if (flip) idx.push(a, c, b, b, c, d); else idx.push(a, b, c, b, d, c);
+        }
+      }
+    }
+    const m = this._mesh(pos, uv, null, idx, mat, { cast, receive: true });
+    ch.meshes.push(m);
+    return m;
+  }
+
+  /** Tunnel: lined walls up to a ceiling, a centre wall between the bores, light strips, a concrete box outside. */
+  _tunnelGeo(ch, rows, toLocal, r0, r1, c) {
+    const L = this.layout, env = this.env, H = env.wallHeight, Hc = 6.6, W = L.wallD;
+    const S = (prof, mat, o) => this._sheet(ch, rows, toLocal, r0, r1, prof, mat, o);
+    const lin = { uS: 0.25, vFit: true };
+    // linings over the parapets, and both faces of the centre wall
+    S([[W - 0.22, H + 0.06], [W - 0.22, Hc]], this.mat.tunnel, { ...lin, flip: true });
+    S([[-(W - 0.22), H + 0.06], [-(W - 0.22), Hc]], this.mat.tunnel, lin);
+    S([[0.2, 0.95], [0.2, Hc]], this.mat.tunnel, lin);
+    S([[-0.2, 0.95], [-0.2, Hc]], this.mat.tunnel, { ...lin, flip: true });
+    // ceiling, roof slab and the outside of the box
+    S([[-(W + 0.3), Hc], [W + 0.3, Hc]], this.mat.soffit, { uS: 0.1, vS: 0.1 });
+    S([[-(W + 0.3), Hc + 0.7], [W + 0.3, Hc + 0.7]], this.mat.concrete, { uS: 0.1, vS: 0.1, flip: true });
+    S([[W + 0.27, -2.6], [W + 0.27, Hc + 0.7]], this.mat.concrete, { uS: 0.12, vS: 0.12 });
+    S([[-(W + 0.27), -2.6], [-(W + 0.27), Hc + 0.7]], this.mat.concrete, { uS: 0.12, vS: 0.12, flip: true });
+    // lamp strips: 2 m units on every other row, high on each wall and on the centre wall
+    const v = [], idx = [], P0 = [0, 0, 0];
+    for (let r = r0; r < r1; r++) {
+      if ((Math.round(rows[r].s / DS) & 1) !== 0) continue;
+      for (const d of [W - 0.25, -(W - 0.25), 0.23, -0.23]) {
+        const base = v.length / 3;
+        for (const [row, h] of [[rows[r], Hc - 0.62], [rows[r], Hc - 0.48], [rows[r + 1], Hc - 0.62], [rows[r + 1], Hc - 0.48]]) {
+          toLocal(row, d, h, P0, 0);
+          v.push(P0[0], P0[1], P0[2]);
+        }
+        idx.push(base, base + 1, base + 2, base + 1, base + 3, base + 2);
+      }
+    }
+    if (idx.length) ch.meshes.push(this._mesh(new Float32Array(v), null, null, idx, this.mat.tunnelLight, {}));
+    // real lights for the cars (always on in a tunnel) and pools of light on the lanes
+    for (let r = r0; r <= r1; r++) {
+      const row = rows[r];
+      if (Math.round(row.s) % 16 !== 0) continue;
+      for (const sd of [1, -1]) {
+        const d = sd * L.laneCenter(1);
+        const c2 = Math.cos(row.H), sn = Math.sin(row.H);
+        ch.lamps.push([row.X + c2 * d, row.Y - sn * d, row.E + Hc - 0.4, 1]);
+        this._addProp(ch, this.pools.tunnelPool, row.s, d, 0.03, 0, 11, 1, 16);
+      }
+    }
+    // portal headers with the tunnel's name over each entrance
+    for (const [sp, dir] of [[c.s0, 1], [c.s1, -1]]) {
+      const r = Math.round((sp - rows[0].s) / DS);
+      if (r < 0 || r > ROWS) continue;
+      const row = rows[r];
+      const g = [];
+      toLocal(row, 0, Hc + 0.35, P0, 0);
+      g.push(new THREE.BoxGeometry(2 * (W + 0.3), 1.6, 0.9).rotateY(-row.H).translate(P0[0], P0[1], P0[2]));
+      ch.meshes.push(new THREE.Mesh(merge(g), this.mat.concrete));
+      // name plate facing the traffic that enters here (our side at the start, the other side at the end)
+      const side = dir;
+      const plate = new THREE.PlaneGeometry(6.2, 1.15);
+      const cell = c.seed % 4;
+      const uv = plate.attributes.uv;
+      for (let i = 0; i < uv.count; i++) uv.setY(i, 1 - (cell + 1 - uv.getY(i)) / 4);
+      const off = 0.48 * dir;
+      plate.rotateY(dir > 0 ? 0 : Math.PI);
+      plate.rotateY(-row.H);
+      const c3 = Math.cos(row.H), sn3 = Math.sin(row.H);
+      toLocal(row, side * L.laneCenter(1), Hc + 0.35, P0, 0);
+      plate.translate(P0[0] - sn3 * off, P0[1], P0[2] + c3 * off);
+      ch.meshes.push(new THREE.Mesh(plate, this.mat.tunnelName));
+    }
+  }
+
+  /** Double deck: another expressway right overhead on portal frames, with lamps under its deck. */
+  _stackGeo(ch, rows, toLocal, r0, r1, c) {
+    const L = this.layout, env = this.env, Hu = 9.4, W = L.wallD + 0.6, P0 = [0, 0, 0];
+    const S = (prof, mat, o) => this._sheet(ch, rows, toLocal, r0, r1, prof, mat, o);
+    S([[-W, Hu], [W, Hu]], this.mat.soffit, { uS: 0.1, vS: 0.1, flip: true, cast: true });
+    S([[-W, Hu + 2.2], [W, Hu + 2.2]], this.mat.soffit, { uS: 0.1, vS: 0.1, cast: true });
+    for (const sd of [1, -1]) {
+      // deck edge girder and the upper road's parapet
+      S([[sd * W, Hu], [sd * W, Hu + 3.5], [sd * (W - 0.45), Hu + 3.5], [sd * (W - 0.45), Hu + 2.2]], this.mat.concrete, { uS: 0.12, vS: 0.12, flip: sd < 0, cast: true });
+    }
+    // portal frames every 36 m: columns outside the walls down to the street, a cross beam under the deck
+    const ground = this.groundOffset(rows[0].s, 0, 1);
+    const g = [];
+    for (let r = r0; r <= r1; r++) {
+      const row = rows[r];
+      if (Math.round(row.s) % 36 !== 0) continue;
+      for (const sd of [1, -1]) {
+        toLocal(row, sd * (L.wallD + 1.7), (ground + Hu) / 2, P0, 0);
+        g.push(new THREE.BoxGeometry(1.7, Hu - ground, 1.7).rotateY(-row.H).translate(P0[0], P0[1], P0[2]));
+      }
+      toLocal(row, 0, Hu - 0.75, P0, 0);
+      g.push(new THREE.BoxGeometry(2 * (L.wallD + 2.6), 1.5, 1.9).rotateY(-row.H).translate(P0[0], P0[1], P0[2]));
+    }
+    if (g.length) { const m = new THREE.Mesh(merge(g), this.mat.concrete); m.castShadow = this.castPropShadows; m.receiveShadow = true; ch.meshes.push(m); }
+    // ceiling lamps over each carriageway, on day and night
+    for (let r = r0; r <= r1; r++) {
+      const row = rows[r];
+      if (Math.round(row.s) % 14 !== 0 || Math.round(row.s) % 36 === 0) continue;
+      for (const sd of [1, -1]) {
+        const d = sd * L.laneCenter(1);
+        this._addProp(ch, this.pools.ceilLamp, row.s, d, Hu, 0, 1, 1, 1);
+        const c2 = Math.cos(row.H), sn = Math.sin(row.H);
+        ch.lamps.push([row.X + c2 * d, row.Y - sn * d, row.E + Hu - 0.25, 1]);
+        this._addProp(ch, this.pools.tunnelPool, row.s, d, 0.03, 0, 10, 1, 13);
+      }
+    }
   }
 
   _mesh(pos, uv, col, idx, mat, { cast = false, receive = false } = {}) {
@@ -818,11 +1314,11 @@ export class Highway {
       if (Math.abs(ft.s - s) > 420) continue;
       const a = this._featAnchor(ft);
       if (ft.type === 'overpass') {
-        if (this._footHit(this._foot(a.X, a.Y, a.yaw, L.wallD + 140, 9.5), f, m)) return false;
+        if (this._footHit(this._foot(a.X, a.Y, a.yaw, this.tokyo ? 125 : L.wallD + 140, this.tokyo ? 10.5 : 9.5), f, m)) return false;
       } else if (Math.abs(ft.s - s) < 8 + reach && near < L.wallD + 6) return false;
     }
     const sp = this.env.lights.spacing;
-    if (sp > 0 && this.env.lights.style !== 'double' && near < L.wallD + 7) {
+    if (sp > 0 && this.env.lights.style !== 'double' && this.env.lights.style !== 'jp' && near < L.wallD + 7) {
       const k = Math.round(s / sp) * sp;
       if (Math.abs(s - k) < 3 + reach) return false;
     }
@@ -831,11 +1327,14 @@ export class Highway {
     return true;
   }
 
+  /** Crossing angle of an overpass relative to the road (Tokyo's stacked expressways cross at sharper skews). */
+  _skew(ft) { return (hash3(ft.seed) - 0.5) * (this.tokyo ? 1.1 : 0.35); }
+
   _featAnchor(ft) {
     if (!ft.anchor) {
       const a = { ...this.road.sample(ft.s) };
       let yaw = a.H;
-      if (ft.type === 'overpass') yaw += (hash3(ft.seed) - 0.5) * 0.35;
+      if (ft.type === 'overpass') yaw += this._skew(ft);
       ft.anchor = { X: a.X, Y: a.Y, yaw };
     }
     return ft.anchor;
@@ -852,21 +1351,23 @@ export class Highway {
     if (sp > 0) {
       for (let s = Math.ceil(s0 / sp) * sp; s < s1; s += sp) {
         const style = env.lights.style;
-        const d = style === 'double' ? 0 : L.wallD + 1.4;
-        // no poles through overpass decks or gantry legs
-        let blocked = false;
+        // Tokyo: lamps stand on the parapets, alternating sides, arms reaching over the lanes
+        const side = style === 'jp' ? (Math.round(s / sp) % 2 ? -1 : 1) : 1;
+        const d = style === 'double' ? 0 : style === 'jp' ? side * (L.wallD - 0.02) : L.wallD + 1.4;
+        // no poles through overpass decks, gantry legs or covered stretches
+        let blocked = this.tokyo && this._inCover(s, 10);
         for (const f of this.features) {
           const ds = Math.abs(f.s - s);
-          if ((f.type === 'overpass' && ds < 12 + Math.abs(d) * 0.2) || (f.type === 'gantry' && ds < 3)) { blocked = true; break; }
+          if ((f.type === 'overpass' && ds < 12 + Math.abs(d) * (this.tokyo ? 0.75 : 0.2)) || (f.type === 'gantry' && ds < 3)) { blocked = true; break; }
         }
         if (blocked) continue;
-        const p = this._addProp(ch, P.light, s, d, 0, 0, 1, 1, 1);
+        const p = this._addProp(ch, P.light, s, d, style === 'jp' ? env.wallHeight + 0.06 : 0, side < 0 ? Math.PI : 0, 1, 1, 1);
         const c = Math.cos(p.H), sn = Math.sin(p.H);
         for (const lp of this.lampLocal) {
-          const lx = d + lp[0];
-          const X = p.X + c * lp[0], Y = p.Y - sn * lp[0];
-          ch.lamps.push([X, Y, p.E + lp[1]]);
-          this._addProp(ch, P.lightPool, s, lx, 0.03, 0, 15, 1, 19);
+          const lat = lp[0] * side;
+          const X = p.X + c * lat, Y = p.Y - sn * lat;
+          ch.lamps.push([X, Y, p.E + lp[1] + (style === 'jp' ? env.wallHeight + 0.06 : 0)]);
+          this._addProp(ch, P.lightPool, s, d + lat, 0.03, 0, this.tokyo ? 17 : 15, 1, this.tokyo ? 27 : 19);
         }
       }
     }
@@ -878,8 +1379,28 @@ export class Highway {
       obj.visible = true;
       const a = { ...this.road.sample(f.s) };
       let yaw = a.H;
-      if (f.type === 'overpass') yaw += (hash3(f.seed) - 0.5) * 0.35;
-      if (f.type === 'gantry') {
+      if (f.type === 'overpass') yaw += this._skew(f);
+      if (f.type === 'overpass' && this.tokyo) {
+        // some crossings fly higher; hide piers that would land on (or near) our road
+        a.E += hash3(f.seed + 7) * 7;
+        const cy = Math.cos(yaw), sy = Math.sin(yaw), q = {};
+        for (const pr of obj.userData.piers) {
+          const X = a.X + pr.x * cy, Y = a.Y - pr.x * sy;
+          this.road.project(X, Y, f.s, q);
+          pr.mesh.visible = Math.abs(q.d) > L.wallD + 4.5 && !this._inCover(q.s, 6);
+        }
+      }
+      if (f.type === 'gantry' && this.tokyo) {
+        const r = mulberry32(f.seed);
+        const signs = obj.userData.signs;
+        const n = r() < 0.35 ? 1 : 2;
+        signs.forEach((sg, i) => {
+          sg.holder.visible = i < n;
+          if (i >= n) return;
+          sg.holder.position.x = n === 1 ? L.laneCenter(1) : L.laneStart + L.LW * (i === 0 ? 0.78 : 2.25);
+          sg.face.material = this.signMats[Math.floor(r() * this.signMats.length)];
+        });
+      } else if (f.type === 'gantry') {
         const r = mulberry32(f.seed);
         const L2 = this.layout;
         const n = r() < 0.5 ? 2 : 3;
@@ -901,7 +1422,16 @@ export class Highway {
       this._addProp(ch, P.speedSign, s0 + rng() * CL, L.wallD + 1.2, env.elevated ? 0 : 0, 0, 1, 1, 1);
     }
     // Viaduct piers
-    if (env.elevated) {
+    if (env.elevated && this.tokyo) {
+      // one T-pier under each carriageway every 34 m
+      const dc = (L.laneStart + L.roadEdge) / 2;
+      for (let s = Math.ceil(s0 / 34) * 34; s < s1; s += 34) {
+        for (const d of [dc, -dc]) {
+          this._addProp(ch, P.tpier, s, d, -2.6 - 1.8, 0, 1, env.elevated - 2.6 - 1.8 + 0.2, 1);
+          this._addProp(ch, P.tcap, s, d, -2.6, 0, 1, 1, 1);
+        }
+      }
+    } else if (env.elevated) {
       for (let s = Math.ceil(s0 / 32) * 32; s < s1; s += 32) {
         for (const d of [0, L.roadEdge - 4, -(L.roadEdge - 4)]) {
           this._addProp(ch, P.pier, s, d, -1.9, 0, 1, env.elevated - 1.6, 1);
@@ -962,10 +1492,11 @@ export class Highway {
     // Buildings first (largest footprints), then billboards, then vegetation fills the gaps
     if (pr.buildings > 0) {
       const kinds = pr.buildingKinds;
-      const bands = env.elevated ? [[18, 50], [65, 120], [140, 230], [250, 360]] : [[30, 70], [85, 150], [170, 260], [280, 380]];
+      const bands = this.tokyo ? [[3, 26], [30, 68], [76, 140], [150, 240], [255, 370]]
+        : env.elevated ? [[18, 50], [65, 120], [140, 230], [250, 360]] : [[30, 70], [85, 150], [170, 260], [280, 380]];
       for (const side of [1, -1]) {
         for (let b = 0; b < bands.length; b++) {
-          if (rng() > pr.buildings * (b === 0 && !env.elevated ? 0.55 : 0.9) * Math.min(1, dens + 0.2)) continue;
+          if (rng() > pr.buildings * (b === 0 && !env.elevated ? 0.55 : this.tokyo ? 0.97 : 0.9) * Math.min(1, dens + 0.2)) continue;
           let kind = kinds[Math.floor(rng() * kinds.length)];
           if (b === 0 && (kind === 'tall' || kind === 'tower') && env.id === 'la') kind = 'mid';
           const vars = this.buildingVariants[kind];
@@ -991,6 +1522,7 @@ export class Highway {
             color.setRGB(tint, tint * (0.97 + rng() * 0.06), tint * (0.95 + rng() * 0.1));
             const bp = this._addProp(ch, pool, s, side * dist, h, yawOff, sc, hs, sc, color);
             ch.foot.push(f);
+            if (this.tokyo && b < 3) this._shopSigns(ch, rng, kind, s, side, dist, w * sc, dd * sc, h, pool.dims[1] * hs);
             if (pool.lights.length) {
               const yaw = bp.H + yawOff, cy = Math.cos(yaw), sy = Math.sin(yaw);
               for (const [lx, ly, lz] of pool.lights) {
@@ -1110,14 +1642,20 @@ export class Highway {
     if (!this.mat) return;
     const lit = smoothstep(0.25, 0.75, night);
     this.lampMat.color.copy(this.lampColor).multiplyScalar(0.25 + lit * 1.8);
-    this.poolMat.opacity = lit * (this.lampLights.some((L) => L.visible) ? 0.3 + wet * 0.2 : 0.42 + wet * 0.25);
+    this.poolMat.opacity = lit * (this.tokyo ? 0.6 + wet * 0.2 : this.lampLights.some((L) => L.visible) ? 0.3 + wet * 0.2 : 0.42 + wet * 0.25);
     for (const p of Object.values(this.buildingPools)) p.mat.emissiveIntensity = lit * 1.35;
     const blink = (performance.now() % 1600) < 900 ? 1 : 0.08;
     this.warnMat.color.setRGB(1, 0.16, 0.1).multiplyScalar(lerp(0.35, 2.4 * blink, lit));
     this.reflMat.color.setRGB(1, 0.7, 0.25).multiplyScalar(lerp(0.55, 1.15, lit));
     this.wireMat.color.setScalar(lerp(0.17, 0.05, night));
     for (const p of this.billboardPools) p.panelMat.emissiveIntensity = 0.35 + lit * 1.4;
-    for (const m of this.signMats) m.emissiveIntensity = lit * 0.12;
+    for (const m of this.signMats) m.emissiveIntensity = lit * (this.tokyo ? 0.42 : 0.12);
+    if (this.tokyo) {
+      this.mat.neon.emissiveIntensity = 0.3 + lit * 1.7;
+      this.mat.roadPaint.emissiveIntensity = lit * 0.05;
+      this.mat.ceilLamp.color.copy(this.lampColor).multiplyScalar(1.6);
+      this.mat.soffit.color.setHex(0x8d8f90).multiplyScalar(1 - wet * 0.2);
+    }
     this.mat.marking.emissive.setScalar(lit * 0.06);
     // retroreflectors: dull plastic by day, bright points in the dark
     this.mat.rpm.color.setScalar(lerp(0.62, 1.05, lit) * (1 - this.wet * 0.15));
@@ -1137,7 +1675,8 @@ export class Highway {
     this.buildingPools = {};
     this.buildingVariants = {};
     this.billboardPools = [];
-    for (const m of [this.warnMat, this.reflMat, this.wireMat]) m?.dispose();
+    for (const m of [this.warnMat, this.reflMat, this.wireMat, this.tunnelPoolMat]) m?.dispose();
+    this.tunnelPoolMat = null;
     if (this.gantryPool) for (const o of this.gantryPool.free) this.group.remove(o);
     if (this.overpassPool) for (const o of this.overpassPool.free) this.group.remove(o);
     for (const t of this.textures || []) t.dispose();

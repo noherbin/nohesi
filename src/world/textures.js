@@ -1,5 +1,6 @@
 // Procedural canvas textures. Everything is generated at runtime: no external assets.
 import * as THREE from 'three';
+import { canDrawJapanese, JP_FONT } from './tokyo.js';
 import { mulberry32 } from '../core/utils.js';
 
 export const TEX = { anisotropy: 4 };
@@ -258,8 +259,8 @@ export function groundTexture(seed = 11) {
  */
 export function facadeTextures(kind, seed) {
   const rng = mulberry32(seed);
-  const floors = kind === 'low' ? 4 : kind === 'warehouse' ? 3 : 16;
-  const bays = kind === 'warehouse' ? 6 : kind === 'low' ? 5 : 8;
+  const floors = kind === 'low' ? 4 : kind === 'warehouse' ? 3 : kind === 'office' || kind === 'pencil' ? 12 : 16;
+  const bays = kind === 'warehouse' ? 6 : kind === 'low' ? 5 : kind === 'pencil' ? 3 : 8;
   const P = 64, W = bays * P, H = floors * P;
   // colour at full resolution; light and reflectivity maps at half (same drawing coordinates, scaled)
   const c = canvas(W, H), e = canvas(W / 2, H / 2), r = canvas(W / 2, H / 2);
@@ -282,6 +283,8 @@ export function facadeTextures(kind, seed) {
     tower: ['#a7abae', '#8f969c', '#b8b4ab', '#7d858c'],
     tall: ['#5a646d', '#6b747b', '#4b545c'],
     glass: ['#56616b', '#646e76', '#4a545d'],
+    office: ['#c9c8c0', '#b9bcbc', '#d4d0c4', '#a9adb0', '#c2b8a8', '#8f979e'],
+    pencil: ['#d9c9b0', '#b7c4c9', '#c8b4a6', '#e0dcd2', '#9fa7a0', '#c9a98e'],
   }[kind]);
   const glassTint = pick(kind === 'glass' || kind === 'tall'
     ? [[58, 92, 120], [52, 84, 96], [70, 82, 92], [84, 74, 62], [46, 70, 88]]
@@ -385,7 +388,31 @@ export function facadeTextures(kind, seed) {
         ex.fillStyle = '#000'; for (const mx of [18, 37]) ex.fillRect(x + mx, wy, 2, wh);
       }
     }
-  } else if (kind === 'mid' || kind === 'low') {
+  } else if (kind === 'office') {
+    // Tokyo office block: ribbon glazing between pale spandrel bands; whole floors lit by fluorescent tubes
+    for (let f = 0; f < floors; f++) {
+      const y = f * P, wy = y + 8, wh = 36;
+      ctx.fillStyle = shade(wallCol, 0.8); ctx.fillRect(0, wy - 3, W, 3);
+      const r = rng();
+      const mode = r < 0.5 ? 'all' : r < 0.78 ? 'part' : 'dark';
+      const col = rng() < 0.85 ? [226, 238, 255] : [255, 238, 210], kF = 0.62 + rng() * 0.33;
+      const a0 = Math.floor(rng() * bays), a1 = a0 + 1 + Math.floor(rng() * bays);
+      for (let bI = 0; bI < bays; bI++) {
+        const x = bI * P + 6;
+        pane(x, wy, P - 6, wh, 0.08);
+        ctx.fillStyle = shade(wallCol, 0.58);
+        for (const mx of [19, 39]) ctx.fillRect(x + mx, wy, 2, wh);
+        const on = mode === 'all' || (mode === 'part' && bI >= a0 && bI < a1);
+        if (on) {
+          office(x, wy, P - 6, wh, col, kF);
+          // ceiling tubes catch the eye from outside
+          ex.fillStyle = `rgba(${col[0]},${col[1]},${col[2]},${Math.min(1, kF + 0.25)})`;
+          for (let tx = x + 3; tx < x + P - 10; tx += 14) ex.fillRect(tx, wy + 2, 9, 2);
+        }
+        ex.fillStyle = '#000'; for (const mx of [19, 39]) ex.fillRect(x + mx, wy, 2, wh);
+      }
+    }
+  } else if (kind === 'mid' || kind === 'low' || kind === 'pencil') {
     // punched windows with sills; low-rise blocks get a glazed shopfront on the ground storey
     for (let f = 0; f < floors; f++) {
       const y = f * P, st = storey(f);
@@ -409,7 +436,7 @@ export function facadeTextures(kind, seed) {
         rx.fillStyle = wallRM; rx.fillRect(x + ww / 2 - 1, wy, 2, wh);
         if (rng() < (kind === 'low' ? 0.3 : 0.36)) { home(x, wy, ww, wh); ex.fillStyle = '#000'; ex.fillRect(x + ww / 2 - 1, wy, 2, wh); }
       }
-      if (kind === 'mid' && st % 4 === 3) { ctx.fillStyle = shade(wallCol, 0.9); ctx.fillRect(0, y + P - 4, W, 4); } // string course
+      if ((kind === 'mid' || kind === 'pencil') && st % 4 === 3) { ctx.fillStyle = shade(wallCol, 0.9); ctx.fillRect(0, y + P - 4, W, 4); } // string course
     }
   } else if (kind === 'warehouse') {
     // ribbed metal cladding, clerestory glazing up top, roll-up doors with a wall light over each
@@ -555,14 +582,24 @@ export function speedSignTexture() {
 export function plateTexture(text, style = 'ca') {
   const c = canvas(256, 128);
   const ctx = c.getContext('2d');
-  if (style === 'jdm') {
-    ctx.fillStyle = '#f0f0e8';
-    ctx.fillRect(0, 0, 256, 128);
-    ctx.strokeStyle = '#2a6b3a';
-    ctx.lineWidth = 6;
-    ctx.strokeRect(3, 3, 250, 122);
-    ctx.fillStyle = '#2a6b3a';
-  } else if (style === 'yellow') {
+  if (style === 'jdm' || style === 'jp') {
+    // Japanese plate: area name and class number on top, a hiragana and the big serial below, in green
+    ctx.fillStyle = '#f2f2ea'; ctx.fillRect(0, 0, 256, 128);
+    ctx.strokeStyle = '#2a6b3a'; ctx.lineWidth = 5; ctx.strokeRect(4, 4, 248, 120);
+    ctx.fillStyle = '#245f33';
+    ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    const jp = canDrawJapanese();
+    const areas = jp ? ['品川', '練馬', '横浜', '足立', '多摩', '湘南'] : ['SHINAGAWA', 'NERIMA', 'YOKOHAMA', 'ADACHI'];
+    let hsh = 0; for (const ch of String(text)) hsh = (hsh * 31 + ch.charCodeAt(0)) >>> 0;
+    ctx.font = jp ? `bold 28px ${JP_FONT}` : 'bold 24px "Barlow Condensed", Arial, sans-serif';
+    ctx.fillText(`${areas[hsh % areas.length]} ${300 + (hsh % 99)}`, 140, 26);
+    if (jp) { ctx.font = `bold 30px ${JP_FONT}`; ctx.fillText('さわてるのみ'[hsh % 6], 30, 82); }
+    ctx.font = 'bold 66px "Barlow Condensed", "Arial Narrow", Arial, sans-serif';
+    const t = String(text), w = ctx.measureText(t).width, k = Math.min(1, 186 / Math.max(1, w));
+    ctx.save(); ctx.translate(146, 82); ctx.scale(k, 1); ctx.fillText(t, 0, 0); ctx.restore();
+    return finish(c, { repeat: false });
+  }
+  if (style === 'yellow') {
     ctx.fillStyle = '#f2c230';
     ctx.fillRect(0, 0, 256, 128);
     ctx.fillStyle = '#111';

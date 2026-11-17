@@ -70,7 +70,7 @@ export function buildingVariant(kind, w, h, d, fpt, bpt, seed) {
     const pw = Math.min(rw * 0.35, 7), pd = Math.min(rd * 0.3, 6);
     parts.push(plain(box(pw, 3.2, pd, (rng() - 0.5) * (rw - pw) * 0.5, roofY + 1.6, (rng() - 0.5) * (rd - pd) * 0.5)));
   }
-  if ((kind === 'low' || kind === 'mid') && rng() < 0.55) {
+  if ((kind === 'low' || kind === 'mid' || kind === 'pencil' || kind === 'office') && rng() < 0.55) {
     // timber water tank on legs
     const tx = (rng() - 0.5) * (rw - 6), tz = (rng() - 0.5) * (rd - 6);
     parts.push(plain(new THREE.CylinderGeometry(1.6, 1.6, 3.2, 12).translate(tx, roofY + 3.6, tz)));
