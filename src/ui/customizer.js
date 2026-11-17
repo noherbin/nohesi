@@ -25,6 +25,8 @@ const txt = (tag, cls, text) => { const e = el(tag, cls); e.textContent = text; 
 const clampN = (v, a, b) => Math.min(b, Math.max(a, v));
 
 // where the camera goes while browsing each category's slot list
+// which part a slot changes, for the garage close-ups and show effects
+const fxKey = (g) => (g.type === 'paint' ? 'paint' : g.id === 'tint' ? 'tint' : g.id === 'plateText' ? 'plate' : g.key || g.id);
 const CAT_VIEW = { paint: 'paint', body: 'three', wheels: 'wheel', tires: 'wheel', suspension: 'stance', performance: 'three', engine: 'three', interior: 'interior', windows: 'three', plates: 'plate' };
 const PAINT_KEYS = ['color', 'finish', 'color2', 'roofPaint', 'hoodPaint', 'mirrorPaint', 'kitColor', 'wrap', 'wrapColor'];
 const STAT_ROWS = [['speed', 'SPEED'], ['handling', 'HANDLING'], ['accel', 'ACCELERATION'], ['launch', 'LAUNCH'], ['braking', 'BRAKING']];
@@ -74,6 +76,7 @@ export class Customizer {
   open(carId) {
     this.carId = carId;
     this.draft = { ...this.saved };
+    this.game.previewCustom(carId, this.draft); // the car on the turntable (already there when coming from the garage)
     this.level = 'groups';
     if (!this.cats.some((c) => c.id === this.catId)) this.catId = this.cats[0].id;
     this.gi = clampN(this.gi, 0, this.groups.length - 1);
@@ -158,7 +161,11 @@ export class Customizer {
   /* ---------------------------------------------------------------- preview */
   preview(now = false) {
     clearTimeout(this._pvT);
-    const run = () => this.game.previewCustom(this.carId, this.draft);
+    const run = () => {
+      this.game.previewCustom(this.carId, this.draft);
+      // the part just put on the car shows itself off
+      if (this._pulseKey) { this.game.garage.pulse(this._pulseKey); this._pulseKey = null; }
+    };
     // rebuilding a car takes a moment: while the selection is still moving, wait for it to settle
     if (now) run();
     else this._pvT = setTimeout(run, 90);
@@ -177,6 +184,7 @@ export class Customizer {
     if (this.level === 'groups') this.gi = i; else this.ii = i;
     this.game.audio.click();
     this.onSelect();
+    if (this.level === 'groups') this._lookAtGroup();
     this.render();
   }
 
@@ -185,8 +193,8 @@ export class Customizer {
     if (this.level !== 'items') return;
     const r = this.rows()[this.ii];
     const g = this.group;
-    if (r?.kind === 'item') { this.draft[g.key] = r.it.id; this.preview(); }
-    if (r?.kind === 'swatch') { this.draft[g.key] = r.color; this.preview(true); }
+    if (r?.kind === 'item') { this.draft[g.key] = r.it.id; this._pulseKey = fxKey(g); this.preview(); }
+    if (r?.kind === 'swatch') { this.draft[g.key] = r.color; this._pulseKey = fxKey(g); this.preview(true); }
   }
 
   /** Left / right: switch category at the slot list; change the value of a paint row or slider. */
@@ -201,6 +209,14 @@ export class Customizer {
     if (dir < 0) this.back();
   }
 
+  /** At the slot list: the camera flies to the part the highlighted slot changes. */
+  _lookAtGroup() {
+    const g = this.groups[this.gi];
+    if (!g) return;
+    this.game.garage.focusPart(fxKey(g), g.view || CAT_VIEW[this.cat.id] || 'three');
+    this.game.garage.fx.punch = 0.6;
+  }
+
   switchCat(dir) {
     const cats = this.cats;
     const i = cats.findIndex((c) => c.id === this.cat.id);
@@ -212,6 +228,8 @@ export class Customizer {
     this.gi = 0;
     this._dir = dir;
     this.game.audio.click();
+    this.game.audio.whoosh(dir, 0.55, 30);
+    this.game.garage.whoosh();
     if (this.single) return this.openGroup(0, true);
     this.game.garage.setView(CAT_VIEW[this.catId] || 'three');
     this.render(true);
@@ -241,7 +259,7 @@ export class Customizer {
     else this.ii = 0;
     this._dir = 1;
     if (!quiet) this.game.audio.click();
-    this.game.garage.setView(g.view || 'three');
+    this.game.garage.focusPart(fxKey(g), g.view || 'three');
     this.render(true);
   }
 
@@ -294,13 +312,30 @@ export class Customizer {
     const s = this.saved;
     for (const k of this.keysOf(g)) s[k] = this.draft[k];
     this.game.setCustom(this.carId, s);
+    this._pulseKey = null;
     this.preview(true);
     this.game.audio.bigChime();
-    this._celebrate(price ? `PURCHASED · ${name.toUpperCase()}` : `INSTALLED · ${name.toUpperCase()}`);
+    // the install show: camera swoop, flash, sparks, and the part shows itself off
+    const key = fxKey(g);
+    const color = g.type === 'paint' ? s.color : g.type === 'color' ? s[g.key] : key === 'underglow' && s.underglow !== 'off' ? s.underglow : null;
+    const kind = this.game.garage.install(key, { color });
+    if (kind === 'engine') setTimeout(() => this.game.revPreview(), 380);
+    this.game.audio.whoosh(0, 0.8, 10);
+    this._celebrate(price ? 'PURCHASED' : 'INSTALLED', name);
     this.render();
   }
 
-  _celebrate(text) {
+  _celebrate(head, name) {
+    // a big stamp over the car (it replaces the toast)
+    document.querySelector('.cz-stamp')?.remove();
+    const st = el('div', 'cz-stamp');
+    st.append(el('i'), txt('b', '', head), txt('span', '', name));
+    $('s-custom').appendChild(st);
+    setTimeout(() => st.remove(), 2100);
+    // white flash across the screen
+    const fl = el('div', 'cz-flash');
+    $('s-custom').appendChild(fl);
+    setTimeout(() => fl.remove(), 700);
     const card = $('cz-card');
     card.classList.remove('cz-done');
     void card.offsetWidth;
@@ -309,7 +344,6 @@ export class Customizer {
     b.innerHTML = '<svg viewBox="0 0 48 48"><circle cx="24" cy="24" r="21"/><path d="M14 25 L21 32 L35 17"/></svg>';
     card.appendChild(b);
     setTimeout(() => b.remove(), 1200);
-    this.ui.toast(text, 'gold');
   }
 
   _shake() {

@@ -242,10 +242,12 @@ export class Game {
   }
 
   revPreview() {
-    if (!this.audio.ready) return;
     const def = this.garage.def;
-    this.audio.setCar(def, this.getCustom(def.id));
-    this.audioDirty = true;
+    if (!def) return;
+    if (this.audio.ready) {
+      this.audio.setCar(def, this.getCustom(def.id));
+      this.audioDirty = true;
+    }
     this.revT = 0;
   }
 
@@ -1161,27 +1163,32 @@ export class Game {
     }
     g.update(dt, this._gfit.offset, this._gfit.fit, this._gfit.offsetY);
     if (this.ui.screen === 'custom') this.ui.cz.update(dt);
-    if (this.revT >= 0 && this.audio.ready) {
+    if (this.revT >= 0 && g.def) {
       this.revT += dt;
       const t = this.revT;
       const red = g.def.phys.redline;
       const rpm = t < 0.25 ? g.def.phys.idle : t < 1.0 ? lerp(g.def.phys.idle, red * 0.92, (t - 0.25) / 0.75) : t < 1.9 ? lerp(red * 0.92, g.def.phys.idle, (t - 1.0) / 0.9) : g.def.phys.idle;
       const load = t > 0.25 && t < 1.0 ? 1 : 0;
+      // the car shakes on its mounts as it revs, and rolls against the engine's torque
+      g.revFx(load ? (rpm / red) : Math.max(0, 0.3 - (t - 1) * 0.3));
       if (t > 1.0 && t - dt <= 1.0) {
-        if (g.def.engine.turbo) this.audio.blowOff(0.8, g.def.engine.flutter);
+        if (g.def.engine.turbo && this.audio.ready) this.audio.blowOff(0.8, g.def.engine.flutter);
         const ex = this.getCustom(g.def.id).exhaust;
         const n = ex === 'straight' ? 8 : ex === 'sport' ? 5 : 2;
-        for (let i = 0; i < n; i++) setTimeout(() => this.audio.pop(0.8), 60 + i * (70 + Math.random() * 60));
+        // backfire: a pop and a flame from the exhausts for each one
+        for (let i = 0; i < n; i++) setTimeout(() => { if (this.audio.ready) this.audio.pop(0.8); g.flameBurst(1); }, 60 + i * (70 + Math.random() * 60));
       }
-      this.audio.update(dt, { rpm, load, boost: load ? clamp((t - 0.4) * 2, 0, 1) : 0, speed: 0, skid: 0, limiter: false, interior: false, rain: 0, active: 1, redline: red });
+      if (this.audio.ready) this.audio.update(dt, { rpm, load, boost: load ? clamp((t - 0.4) * 2, 0, 1) : 0, speed: 0, skid: 0, limiter: false, interior: false, rain: 0, active: 1, redline: red });
       if (t > 2.6) this.revT = -1;
     } else if (this.audio.ready) {
       this.audio.update(dt, { rpm: 900, load: 0, boost: 0, speed: 0, skid: 0, limiter: false, interior: false, rain: 0, active: 0, redline: 7000 });
     }
     this.renderer.toneMappingExposure = 0.9;
     this.renderer.setRenderTarget(null);
+    // portraits first, at the normal exposure; the garage itself flashes brighter during install effects
     // car portraits for the garage list, one per frame, drawn before (and then under) the frame itself
     if (this.ui.screen === 'garage' && this.thumbs.busy) this.thumbs.pump();
+    this.renderer.toneMappingExposure = 0.9 + g.exposureBoost;
     g.render(this.renderer);
   }
 }

@@ -607,3 +607,21 @@ input[type=range]::-moz-range-thumb { width: 12px; height: 12px; border-radius: 
 .lim-msg b { color: #fff; font-size: 14px; letter-spacing: 1px; }
 .lim-msg b.up { color: #6fdc8c; }
 .lim-msg b.dn { color: #ff6b7d; }
+
+/* install stamp: slams in over the car, holds, and lifts away */
+.cz-stamp { position: absolute; left: calc(var(--czL) + 44px); right: calc(var(--czR) + 44px); bottom: calc(var(--czBot) + 9vh); display: flex; flex-direction: column; align-items: center; pointer-events: none; z-index: 6; animation: czStamp 2s cubic-bezier(.2,.8,.2,1) forwards; }
+.cz-stamp b { font-family: var(--cond); font-weight: 800; font-style: italic; font-size: clamp(40px, 5.4vw, 76px); line-height: 0.9; letter-spacing: 2px; color: #fff; text-shadow: 0 0 34px rgba(255,46,77,0.75), 0 3px 0 rgba(0,0,0,0.35); }
+.cz-stamp span { margin-top: 10px; padding: 5px 16px; background: var(--accent); color: #fff; font-family: var(--cond); font-weight: 700; font-style: italic; font-size: 19px; letter-spacing: 1px; transform: skewX(-12deg); box-shadow: 0 6px 24px rgba(255,46,77,0.4); max-width: 100%; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.cz-stamp i { position: absolute; left: -20%; right: -20%; top: 38%; height: 2px; background: linear-gradient(90deg, transparent, #fff 40%, #fff 60%, transparent); transform-origin: left center; animation: czStreak 0.55s cubic-bezier(.2,.8,.2,1) forwards; }
+@keyframes czStamp {
+  0% { opacity: 0; transform: scale(1.9) skewX(-14deg); filter: blur(8px); }
+  9% { opacity: 1; transform: scale(0.94) skewX(-8deg); filter: blur(0); }
+  15% { transform: scale(1) skewX(-8deg); }
+  78% { opacity: 1; transform: scale(1) skewX(-8deg); }
+  100% { opacity: 0; transform: translateY(-16px) scale(1.02) skewX(-8deg); }
+}
+.cz-flash { position: absolute; inset: 0; pointer-events: none; z-index: 5; background: radial-gradient(70% 70% at 50% 55%, rgba(255,255,255,0.55), rgba(255,255,255,0.12) 60%, transparent 85%); animation: czFlash 0.6s ease-out forwards; }
+@keyframes czFlash { from { opacity: 1; } to { opacity: 0; } }
+@keyframes czStreak { from { transform: scaleX(0); opacity: 1; } 70% { opacity: 1; } to { transform: scaleX(1); opacity: 0; } }
+@media (max-width: 860px) { .cz-stamp { left: 16px; right: 16px; bottom: auto; top: calc(var(--czTop) + 40px); } }
+@media (prefers-reduced-motion: reduce) { .cz-flash { display: none; } .cz-stamp, .cz-stamp i { animation-duration: 0.01s; animation-delay: 1.6s; } }

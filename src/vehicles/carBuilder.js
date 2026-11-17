@@ -712,7 +712,7 @@ function faceNormal(ctx, front, x, y) {
 }
 
 /** Surface-conforming patch on the front/rear face. quad = [TL, TR, BR, BL] as [x, y] with x increasing TL->TR. */
-function faceDecal(ctx, front, quad, off = 0.004, nu = 8, nv = 3) {
+function faceDecal(ctx, front, quad, off = 0.004, nu = 8, nv = 3, bulge = 0) {
   const pos = [], uv = [], idx = [];
   const cols = nu + 1;
   let lastZ = null;
@@ -730,8 +730,10 @@ function faceDecal(ctx, front, quad, off = 0.004, nu = 8, nv = 3) {
       // stand off along the surface normal, so layered patches (bezel, lamp, lens) stay stacked in order even
       // where the face turns round the corner (a z-only offset would let them cut through each other there)
       const n = onSurf ? faceNormal(ctx, front, x, y) : null;
-      if (n) pos.push(x + n.x * off, y - ctx.lower + n.y * off, z + n.z * off);
-      else pos.push(x, y - ctx.lower, z + (front ? -off : off));
+      // a domed patch (lamp glass) rises from its edges to a flattish crown, like a moulded lens
+      const o = bulge ? off + bulge * Math.pow(Math.sin(Math.PI * u), 0.45) * Math.pow(Math.sin(Math.PI * v), 0.45) : off;
+      if (n) pos.push(x + n.x * o, y - ctx.lower + n.y * o, z + n.z * o);
+      else pos.push(x, y - ctx.lower, z + (front ? -o : o));
       uv.push(u, 1 - v);
     }
   }
@@ -767,6 +769,85 @@ function faceDisc(ctx, front, x, y, r, off, seg = 18) {
   g.applyQuaternion(new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 0, 1), n));
   g.translate(x + n.x * off, y - ctx.lower + n.y * off, (z ?? ctx.z(front ? 0.05 : 0.95)) + n.z * off);
   return g;
+}
+
+/* ------------------------------------------------------------ 3D lamp units */
+// Lamps are built as real units rather than flat stickers: a domed glass cover sealed to the body by a
+// housing lip, chrome reflector bowls with glass projector lenses inside, and LED light guides as raised
+// tubes and rings. Each piece sits a few millimetres further out along the surface normal than the one
+// under it, so the layers stay in order wherever the face curves.
+
+/** Point on the front/rear face at (x, y), pushed `off` out along the surface normal, plus that normal. */
+function facePoint(ctx, front, x, y, off) {
+  const z = surfZ(ctx, x, y, front) ?? ctx.z(front ? 0.05 : 0.95);
+  const n = faceNormal(ctx, front, x, y);
+  return { p: new THREE.Vector3(x + n.x * off, y - ctx.lower + n.y * off, z + n.z * off), n };
+}
+
+/** Stand a geometry built around +Y up on the face at (x, y): +Y along the surface normal, base `off` out. */
+function onFace(ctx, front, x, y, off, g) {
+  const { p, n } = facePoint(ctx, front, x, y, off);
+  g.applyQuaternion(new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 1, 0), n));
+  return g.translate(p.x, p.y, p.z);
+}
+
+/** Spherical cap around +Y: base radius r on y = 0, crown at y = h. */
+function sphereCap(r, h, seg = 20, rings = 6) {
+  const R = (r * r + h * h) / (2 * h);
+  const g = new THREE.SphereGeometry(R, seg, rings, 0, Math.PI * 2, 0, Math.asin(Math.min(1, r / R)));
+  return g.translate(0, h - R, 0);
+}
+
+/** Round domed lamp glass. */
+function faceDome(ctx, front, x, y, r, off, h, seg = 28) { return onFace(ctx, front, x, y, off, sphereCap(r, h, seg, 7)); }
+
+/** Ring (LED halo, chrome trim) lying on the face around (x, y). */
+function faceRing(ctx, front, x, y, rad, tube, off, seg = 32) {
+  return onFace(ctx, front, x, y, off, new THREE.TorusGeometry(rad, tube, 6, seg).rotateX(Math.PI / 2));
+}
+
+/** Housing lip: a band round a quad's outline from `off0` to `off1` off the surface, sealing glass to body. */
+function faceRim(ctx, front, quad, off0, off1, per = 10) {
+  const pts = [];
+  for (let e = 0; e < 4; e++) {
+    const a = quad[e], b = quad[(e + 1) % 4];
+    for (let i = 0; i < per; i++) pts.push([lerp(a[0], b[0], i / per), lerp(a[1], b[1], i / per)]);
+  }
+  const pos = [], idx = [];
+  for (const [x, y] of pts) for (const o of [off0, off1]) { const { p } = facePoint(ctx, front, x, y, o); pos.push(p.x, p.y, p.z); }
+  const N = pts.length;
+  for (let i = 0; i < N; i++) { const j = (i + 1) % N; idx.push(2 * i, 2 * j, 2 * i + 1, 2 * i + 1, 2 * j, 2 * j + 1); }
+  return indexedGeo(new Float32Array(pos), idx);
+}
+
+/** Round tube (LED light guide) through points [x, y] on the face, `off` out, with rounded ends. */
+function faceTube(ctx, front, pts, r, off) {
+  const P = pts.map(([x, y]) => facePoint(ctx, front, x, y, off).p);
+  const curve = new THREE.CatmullRomCurve3(P, false, 'centripetal');
+  const g = new THREE.TubeGeometry(curve, Math.max(8, pts.length * 3), r, 7, false);
+  const ends = [P[0], P[P.length - 1]].map((q) => new THREE.SphereGeometry(r, 7, 5).translate(q.x, q.y, q.z));
+  return merge([g, ...ends]);
+}
+
+/** Centre line of a strip quad [TL, TR, BR, BL], n + 1 points from its left end to its right. */
+function stripLine(q, n = 10) {
+  const a = [(q[0][0] + q[3][0]) / 2, (q[0][1] + q[3][1]) / 2], b = [(q[1][0] + q[2][0]) / 2, (q[1][1] + q[2][1]) / 2];
+  return Array.from({ length: n + 1 }, (_, i) => [lerp(a[0], b[0], i / n), lerp(a[1], b[1], i / n)]);
+}
+const stripHalf = (q) => (Math.hypot(q[0][0] - q[3][0], q[0][1] - q[3][1]) + Math.hypot(q[1][0] - q[2][0], q[1][1] - q[2][1])) / 4;
+
+/**
+ * Projector headlamp: a polished reflector bowl opening outward, a glass lens dome in its middle and a
+ * chrome shroud round the lens. R = bowl radius.
+ */
+function lampProjector(S, ctx, front, x, y, R) {
+  const prof = [];
+  for (let i = 0; i <= 8; i++) { const t = i / 8; prof.push(new THREE.Vector2(R * (0.32 + 0.68 * Math.sqrt(t)), t * R * 0.5)); }
+  S.refl.push(onFace(ctx, front, x, y, 0.0068, new THREE.LatheGeometry(prof, 22)));
+  const rl = R * 0.46;
+  S.chrome.push(onFace(ctx, front, x, y, 0.0068, new THREE.CylinderGeometry(rl * 1.12, rl * 1.2, R * 0.22, 18, 1, true).translate(0, R * 0.11, 0)));
+  S.proj.push(onFace(ctx, front, x, y, 0.0068 + R * 0.16, sphereCap(rl, rl * 0.62, 20, 6)));
+  S.chrome.push(faceRing(ctx, front, x, y, R * 0.985, Math.max(0.0016, R * 0.05), 0.0068 + R * 0.5, 28));
 }
 
 /** Height where the body side surface reaches half-width x at station t (unlowered). */
@@ -1159,12 +1240,20 @@ function bodyWithParts(b0, custom) {
 export function carParts(def, custom = {}, hi = true) {
   const b = bodyWithParts(def.body, custom);
   const ctx = bodyContext(b, custom, hi);
-  const S = { paint: [], glass: [], trim: [], decal: [], mesh: [], amber: [], amberL: [], amberR: [], chrome: [], head: [], drl: [], lens: [], tail: [], rev: [], plate: [], interior: [], kit: [], body2: [], cabinTop: [], cover: [], head2: [], tips: [] };
+  const S = { paint: [], glass: [], trim: [], decal: [], mesh: [], amber: [], amberL: [], amberR: [], chrome: [], head: [], drl: [], lens: [], tail: [], rev: [], plate: [], interior: [], kit: [], body2: [], cabinTop: [], cover: [], head2: [], tips: [], refl: [], proj: [], housing: [], tailLed: [] };
   const lamps = { head: [], tail: [], ind: [], rev: [], exhaust: [] };
   // debug builds (audit harness) tag every part with the source line that created it
   if (globalThis.__CAR_DEBUG) for (const arr of Object.values(S)) { const push = arr.push; arr.push = function (...gs) { const src = (new Error().stack.split('\n')[2] || '').trim(); for (const g of gs) if (g && g.userData) g.userData.src = src; return push.apply(this, gs); }; }
   const L = ctx.L, W = ctx.W, low = ctx.lower;
   const nu = hi ? 8 : 4, nv = hi ? 3 : 2;
+  // lamp glass: domed in proportion to the lamp's size, sealed to the body by a black housing lip
+  const glass = (front, q, nu0, nv0) => {
+    const a = (Math.hypot(q[1][0] - q[0][0], q[1][1] - q[0][1]) + Math.hypot(q[2][0] - q[3][0], q[2][1] - q[3][1])) / 2;
+    const b = (Math.hypot(q[3][0] - q[0][0], q[3][1] - q[0][1]) + Math.hypot(q[2][0] - q[1][0], q[2][1] - q[1][1])) / 2;
+    S.housing.push(faceRim(ctx, front, q, 0.0015, 0.0125, Math.max(4, Math.ceil(Math.max(a, b) / 0.03))));
+    return faceDecal(ctx, front, q, 0.012, Math.max(nu0, Math.ceil(a / 0.022)), Math.max(nv0, Math.ceil(b / 0.022), 5), Math.min(0.022, Math.max(0.005, Math.min(a, b) * 0.19)));
+  };
+  const tube = (front, pts, r, off = 0.0105, slot = 'drl') => S[slot].push(faceTube(ctx, front, pts, r, off));
 
   const [bp, bt, bc] = loftBody(ctx, b.trimH ?? 0.115, hi);
   S.paint.push(bp);
@@ -1259,11 +1348,13 @@ export function carParts(def, custom = {}, hi = true) {
       S.decal.push(faceDecal(ctx, true, m(bez), 0.003, nu, nv + 1));
       S.head.push(atlasUV(faceDecal(ctx, true, m(q), 0.006, nu, nv + 1), (u, v) => [0.12 + (sx > 0 ? u : 1 - u) * 0.5, 0.15 + v * 0.7]));
       if (hi) {
-        S.cover.push(faceDecal(ctx, true, m(bez), 0.014, nu * 2, nv * 2));
+        S.cover.push(glass(true, m(bez), nu * 2, nv * 2));
         for (const [fu, fv] of [[0.33, 0.36], [0.67, 0.4], [0.33, 0.68], [0.67, 0.72]]) {
+          // four LED projector modules: a glowing halo round a small glass lens in a chrome cup
           const px = sx * (hx - hw / 2 + hw * fu), py = hy - hh / 2 + hh * fv;
-          S.drl.push(faceDisc(ctx, true, px, py, 0.019, 0.009, 16));
-          S.lens.push(faceDisc(ctx, true, px, py, 0.009, 0.011, 12));
+          S.refl.push(onFace(ctx, true, px, py, 0.0068, new THREE.LatheGeometry([0.006, 0.01, 0.014, 0.017].map((r, i) => new THREE.Vector2(r, i * 0.0022)), 18)));
+          S.drl.push(faceRing(ctx, true, px, py, 0.0175, 0.0028, 0.0105, 24));
+          S.proj.push(onFace(ctx, true, px, py, 0.0075, sphereCap(0.0085, 0.006, 16, 5)));
         }
       }
       lamps.head.push([sx * hx, hy - low, (surfZ(ctx, sx * hx, hy, true) ?? ctx.z(0.04)) - 0.03]);
@@ -1276,13 +1367,14 @@ export function carParts(def, custom = {}, hi = true) {
         const x = sx * (hx + dx);
         S.decal.push(faceDisc(ctx, true, x, hy, r + 0.018, 0.003));
         S.head.push(atlasUV(faceDisc(ctx, true, x, hy, r, 0.006), (u, v) => [0.75 + u * 0.25, v]));
-        if (hi) S.cover.push(faceDisc(ctx, true, x, hy, r + 0.014, 0.014, 28));
         if (hi) {
-          // LED ring around a projector lens, as on modern round-lamp sports cars
-          S.drl.push(faceDisc(ctx, true, x, hy, r * 0.88, 0.008, 24));
-          S.head.push(atlasUV(faceDisc(ctx, true, x, hy, r * 0.83, 0.009, 24), (u, v) => [0.75 + u * 0.25, v]));
-          S.chrome.push(faceDisc(ctx, true, x, hy, r * 0.42, 0.01, 16));
-          S.lens.push(faceDisc(ctx, true, x, hy, r * 0.32, 0.011, 16));
+          S.housing.push(onFace(ctx, true, x, hy, 0.0015, new THREE.CylinderGeometry(r + 0.016, r + 0.016, 0.011, 32, 1, true).translate(0, 0.0055, 0)));
+          S.cover.push(faceDome(ctx, true, x, hy, r + 0.016, 0.012, Math.min(0.026, r * 0.3)));
+        }
+        if (hi) {
+          // LED halo ring around a projector, as on modern round-lamp sports cars
+          S.drl.push(faceRing(ctx, true, x, hy, r * 0.84, Math.max(0.0035, r * 0.045), 0.0105, 36));
+          lampProjector(S, ctx, true, x, hy, r * 0.62);
         }
         lamps.head.push([x, hy - low, (surfZ(ctx, x, hy, true) ?? ctx.z(0.04)) - 0.02]);
       }
@@ -1311,24 +1403,22 @@ export function carParts(def, custom = {}, hi = true) {
       // internals texture runs inner -> outer on both sides (the mirrored quad starts at the outer end)
       if (thin) S.head2.push(atlasUV(faceDecal(ctx, true, L1, 0.006, nu, nv), (u, v) => [sx > 0 ? u : 1 - u, v]));
       else S.head.push(atlasUV(faceDecal(ctx, true, L1, 0.006, nu, nv), (u, v) => [(sx > 0 ? u : 1 - u) * 0.75, v]));
-      if (hi) S.cover.push(faceDecal(ctx, true, B1, 0.014, nu * 2, nv * 2));
+      if (hi) S.cover.push(glass(true, B1, nu * 2, nv * 2));
       if (hi) {
         // projector lenses and a DRL strip for detail
-        for (const f of [0.28, 0.6]) {
-          const px = sx * (hx - hw / 2 + hw * f);
-          S.chrome.push(faceDisc(ctx, true, px, hy + 0.005, hh * 0.3, 0.009, 14));
-          S.lens.push(faceDisc(ctx, true, px, hy + 0.005, hh * 0.22, 0.011, 14));
-        }
+        for (const f of [0.28, 0.6]) lampProjector(S, ctx, true, sx * (hx - hw / 2 + hw * f), hy + 0.005, Math.min(hh * 0.44, hw * 0.14));
         const drl = [[hx - hw / 2 + 0.02, hy - hh / 2 + 0.022], [hx + hw / 2 - 0.02, hy - hh / 2 + hh * 0.45 + slant * 0.4 + 0.012], [hx + hw / 2 - 0.02, hy - hh / 2 + hh * 0.45 + slant * 0.4 + 0.002], [hx - hw / 2 + 0.02, hy - hh / 2 + 0.01]];
-        S.drl.push(faceDecal(ctx, true, sx > 0 ? drl : mirrorQuad(drl), 0.009, 6, 1));
+        const dq = sx > 0 ? drl : mirrorQuad(drl);
+        tube(true, stripLine(dq, 12), Math.max(0.0034, Math.min(0.006, stripHalf(dq))));
         if (headStyle === 'arrow') {
           // Y signature: an upper stroke along the top edge that forks down to meet the lower one
           const yTop = (f) => hy + hh / 2 + slant * 0.4 * f - 0.012;
           const up = [[hx - hw / 2 + 0.05, yTop(0.12)], [hx + hw / 2 - 0.03, yTop(0.95)], [hx + hw / 2 - 0.03, yTop(0.95) - 0.012], [hx - hw / 2 + 0.05, yTop(0.12) - 0.012]];
           const xm = hx - hw * 0.02;
           const fork = [[xm - 0.008, yTop(0.45) - 0.004], [xm + 0.008, yTop(0.45) - 0.004], [xm + 0.046, hy - hh / 2 + 0.016], [xm + 0.03, hy - hh / 2 + 0.016]];
-          S.drl.push(faceDecal(ctx, true, sx > 0 ? up : mirrorQuad(up), 0.0095, 6, 1));
-          S.drl.push(faceDecal(ctx, true, sx > 0 ? fork : mirrorQuad(fork), 0.0095, 2, 2));
+          const uq = sx > 0 ? up : mirrorQuad(up), fq = sx > 0 ? fork : mirrorQuad(fork);
+          tube(true, stripLine(uq, 12), 0.0042);
+          tube(true, stripLine([[fq[0][0], fq[0][1]], [fq[3][0], fq[3][1]], [fq[2][0], fq[2][1]], [fq[1][0], fq[1][1]]], 6), 0.0042);
         }
       }
       lamps.head.push([sx * hx, hy - low, (surfZ(ctx, sx * hx, hy, true) ?? ctx.z(0.04)) - 0.03]);
@@ -1354,6 +1444,14 @@ export function carParts(def, custom = {}, hi = true) {
     const du = hi ? nu + 6 : nu, dv = hi ? nv + 3 : nv;
     S.decal.push(faceDecal(ctx, true, f, 0.004, du, dv));
     S.mesh.push(worldUV(faceDecal(ctx, true, q, 0.006, du, dv), scale));
+    if (hi) {
+      // raised gloss surround: the mesh sits sunk inside it, so the opening reads as a real hole with depth
+      for (let e = 0; e < 4; e++) {
+        S.decal.push(faceDecal(ctx, true, e === 0 ? [f[0], f[1], q[1], q[0]] : e === 1 ? [q[1], f[1], f[2], q[2]] : e === 2 ? [q[3], q[2], f[2], f[3]] : [f[0], q[0], q[3], f[3]], 0.0125, e % 2 ? 1 : du, e % 2 ? dv : 1));
+      }
+      S.housing.push(faceRim(ctx, true, f, 0.002, 0.0125, Math.max(6, du)));
+      S.housing.push(faceRim(ctx, true, q, 0.006, 0.0125, Math.max(6, du)));
+    }
   };
   const yb0 = yLip;
   // keep openings on the forward-facing part of the bumper (never smeared round the corners)
@@ -1450,8 +1548,8 @@ export function carParts(def, custom = {}, hi = true) {
     const fx = sx * W * 0.335, fy = yb0 + 0.085;
     if (Math.abs(fx) + 0.06 < ctx.halfWAt(0.03, fy)) {
       S.decal.push(faceDisc(ctx, true, fx, fy, 0.056, 0.004, 20));
-      S.chrome.push(faceDisc(ctx, true, fx, fy, 0.04, 0.006, 20));
-      S.lens.push(faceDisc(ctx, true, fx, fy, 0.022, 0.008, 16));
+      lampProjector(S, ctx, true, fx, fy, 0.038);
+      S.cover.push(faceDome(ctx, true, fx, fy, 0.05, 0.004, 0.024));
     }
   });
 
@@ -1465,8 +1563,12 @@ export function carParts(def, custom = {}, hi = true) {
     const bx = Math.min(W * 0.42, rearMaxX(ty));
     S.decal.push(faceDecal(ctx, false, rectQuad(-bx, bx, ty - th / 2 - 0.015, ty + th / 2 + 0.015), 0.003, hi ? 16 : 6, 2));
     S.tail.push(faceDecal(ctx, false, rectQuad(-bx + 0.012, bx - 0.012, ty - th / 2, ty + th / 2), 0.006, hi ? 16 : 6, 2));
-    if (hi) S.cover.push(faceDecal(ctx, false, rectQuad(-bx, bx, ty - th / 2 - 0.015, ty + th / 2 + 0.015), 0.013, 24, 3));
-    if (hi) S.decal.push(faceDecal(ctx, false, rectQuad(-bx + 0.03, bx - 0.03, ty - 0.004, ty + 0.004), 0.009, 16, 1));
+    if (hi) S.cover.push(glass(false, rectQuad(-bx, bx, ty - th / 2 - 0.015, ty + th / 2 + 0.015), 24, 3));
+    if (hi) {
+      // full-width LED light bar: an upper and a lower light guide either side of a dark centre rib
+      S.decal.push(faceDecal(ctx, false, rectQuad(-bx + 0.03, bx - 0.03, ty - 0.004, ty + 0.004), 0.009, 16, 1));
+      for (const yy of [ty + th * 0.26, ty - th * 0.26]) tube(false, Array.from({ length: 25 }, (_, i) => [lerp(-bx + 0.03, bx - 0.03, i / 24), yy]), Math.min(0.0055, th * 0.12), 0.0105, 'tailLed');
+    }
     both((sx) => lamps.tail.push([sx * tx, ty - low, (surfZ(ctx, sx * tx, ty, false) ?? ctx.z(0.97)) + 0.03]));
   } else if (tailStyle === 'round') {
     S.decal.push(faceDecal(ctx, false, rectQuad(-W * 0.43, W * 0.43, ty - 0.09, ty + 0.09), 0.003, hi ? 12 : 6, 2));
@@ -1474,7 +1576,14 @@ export function carParts(def, custom = {}, hi = true) {
       for (const dx of [-0.09, 0.09]) {
         const x = sx * (tx + dx);
         S.tail.push(faceDisc(ctx, false, x, ty, 0.068, 0.006));
-        if (hi) S.chrome.push(faceDisc(ctx, false, x, ty, 0.022, 0.008, 10));
+        if (hi) {
+          // ring of LEDs round a chrome-cupped centre, under a domed lens
+          S.tailLed.push(faceRing(ctx, false, x, ty, 0.05, 0.0055, 0.0105, 36));
+          S.refl.push(onFace(ctx, false, x, ty, 0.0066, new THREE.LatheGeometry([0.008, 0.014, 0.019, 0.023].map((r, i) => new THREE.Vector2(r, i * 0.003)), 20)));
+          S.tailLed.push(onFace(ctx, false, x, ty, 0.007, sphereCap(0.009, 0.006, 14, 4)));
+          S.housing.push(onFace(ctx, false, x, ty, 0.0015, new THREE.CylinderGeometry(0.074, 0.074, 0.011, 32, 1, true).translate(0, 0.0055, 0)));
+          S.cover.push(faceDome(ctx, false, x, ty, 0.074, 0.012, 0.018));
+        }
         lamps.tail.push([x, ty - low, (surfZ(ctx, x, ty, false) ?? ctx.z(0.97)) + 0.03]);
       }
     });
@@ -1484,7 +1593,13 @@ export function carParts(def, custom = {}, hi = true) {
       const qq = rectQuad(x0, x1, ty - 0.17, ty + 0.17);
       S.decal.push(faceDecal(ctx, false, sx > 0 ? rectQuad(x0 - 0.012, x1 + 0.01, ty - 0.185, ty + 0.185) : mirrorQuad(rectQuad(x0 - 0.012, x1 + 0.01, ty - 0.185, ty + 0.185)), 0.003, 3, 4));
       S.tail.push(faceDecal(ctx, false, sx > 0 ? qq : mirrorQuad(qq), 0.006, 3, 4));
-      if (hi) S.cover.push(faceDecal(ctx, false, sx > 0 ? rectQuad(x0 - 0.012, x1 + 0.01, ty - 0.185, ty + 0.185) : mirrorQuad(rectQuad(x0 - 0.012, x1 + 0.01, ty - 0.185, ty + 0.185)), 0.013, 4, 6));
+      if (hi) S.cover.push(glass(false, sx > 0 ? rectQuad(x0 - 0.012, x1 + 0.01, ty - 0.185, ty + 0.185) : mirrorQuad(rectQuad(x0 - 0.012, x1 + 0.01, ty - 0.185, ty + 0.185)), 4, 6));
+      if (hi) {
+        // a vertical light guide down the lamp crossed by short LED bars
+        const xm = sx * (x0 + x1) / 2, w2 = (x1 - x0) / 2 - 0.022;
+        tube(false, [[xm, ty + 0.15], [xm, ty + 0.05], [xm, ty - 0.05], [xm, ty - 0.15]], 0.0055, 0.0105, 'tailLed');
+        for (const yy of [ty + 0.11, ty + 0.037, ty - 0.037, ty - 0.11]) tube(false, [[xm - w2, yy], [xm, yy], [xm + w2, yy]], 0.0042, 0.0098, 'tailLed');
+      }
       lamps.tail.push([sx * (x0 + x1) / 2, ty - low, (surfZ(ctx, sx * (x0 + x1) / 2, ty, false) ?? ctx.z(0.97)) + 0.03]);
     });
   } else if (tailStyle === 'band') {
@@ -1499,8 +1614,14 @@ export function carParts(def, custom = {}, hi = true) {
       S.tail.push(faceDecal(ctx, false, m(rectQuad(xr, xo, ty - th / 2, ty + th / 2)), 0.006, 6, 2));
       if (hi) {
         S[sx < 0 ? 'amberL' : 'amberR'].push(faceDecal(ctx, false, m(rectQuad(xr - 0.11, xr - 0.008, ty - th / 2, ty + th / 2)), 0.006, 3, 2));
-        S.cover.push(faceDecal(ctx, false, m(rectQuad(xr - 0.12, xo + 0.008, ty - th / 2 - 0.008, ty + th / 2 + 0.008)), 0.013, 8, 2));
-        for (let k = 1; k < 4; k++) S.decal.push(faceDecal(ctx, false, m(rectQuad(xr, xo, ty - th / 2 + (th * k) / 4 - 0.002, ty - th / 2 + (th * k) / 4 + 0.002)), 0.008, 6, 1));
+        S.cover.push(glass(false, m(rectQuad(xr - 0.12, xo + 0.008, ty - th / 2 - 0.008, ty + th / 2 + 0.008)), 8, 2));
+        // raised ribs across the lens and a light guide along its top
+        for (let k = 1; k < 4; k++) {
+          const yy = ty - th / 2 + (th * k) / 4;
+          S.housing.push(faceDecal(ctx, false, m(rectQuad(xr, xo, yy - 0.0025, yy + 0.0025)), 0.0095, 8, 1));
+        }
+        const rq = m(rectQuad(xr + 0.012, xo - 0.012, ty + th / 2 - 0.016, ty + th / 2 - 0.008));
+        tube(false, stripLine(rq, 10), 0.0045, 0.0105, 'tailLed');
       }
       lamps.tail.push([sx * (xr + xo) / 2, ty - low, (surfZ(ctx, sx * (xr + xo) / 2, ty, false) ?? ctx.z(0.97)) + 0.03]);
     });
@@ -1512,8 +1633,11 @@ export function carParts(def, custom = {}, hi = true) {
       const pocket = [[cx - 0.2, ty + 0.06], [cx + 0.16, ty + 0.075], [cx + 0.2, ty - 0.055], [cx - 0.16, ty - 0.07]];
       S.decal.push(faceDecal(ctx, false, m(pocket), 0.003, 8, 3));
       const arm = (x0, y0, x1, y1, w = 0.02) => [[x0, y0 + w / 2], [x1, y1 + w / 2], [x1, y1 - w / 2], [x0, y0 - w / 2]];
-      for (const q of [arm(cx - 0.17, ty + 0.035, cx, ty), arm(cx - 0.15, ty - 0.045, cx, ty), arm(cx, ty, cx + 0.17, ty + 0.01)]) S.tail.push(faceDecal(ctx, false, m(q), 0.007, 6, 1));
-      if (hi) S.cover.push(faceDecal(ctx, false, m(pocket), 0.013, 10, 4));
+      for (const q of [arm(cx - 0.17, ty + 0.035, cx, ty), arm(cx - 0.15, ty - 0.045, cx, ty), arm(cx, ty, cx + 0.17, ty + 0.01)]) {
+        S.tail.push(faceDecal(ctx, false, m(q), 0.007, 6, 1));
+        if (hi) tube(false, stripLine(m(q), 8), 0.0062, 0.0105, 'tailLed');
+      }
+      if (hi) S.cover.push(glass(false, m(pocket), 10, 4));
       lamps.tail.push([sx * cx, ty - low, (surfZ(ctx, sx * cx, ty, false) ?? ctx.z(0.97)) + 0.03]);
     });
   } else if (tailStyle === 'blade') {
@@ -1527,7 +1651,14 @@ export function carParts(def, custom = {}, hi = true) {
       S.decal.push(faceDecal(ctx, false, m([[xi - 0.012, ty + th * 0.2 + 0.012], [xo + 0.008, ty + th / 2 + 0.012], [xo - 0.004, ty - th / 2 - 0.012], [xi + 0.01, ty - th * 0.2 - 0.012]]), 0.003, nu, nv));
       S.tail.push(faceDecal(ctx, false, m(top), 0.006, nu, nv));
       S.tail.push(faceDecal(ctx, false, m(drop), 0.006, 2, 3));
-      if (hi) S.cover.push(faceDecal(ctx, false, m([[xi - 0.012, ty + th * 0.2 + 0.012], [xo + 0.008, ty + th / 2 + 0.012], [xo - 0.004, ty - th / 2 - 0.012], [xi + 0.01, ty - th * 0.2 - 0.012]]), 0.013, nu * 2, nv));
+      if (hi) {
+        // one light guide that runs along the blade and turns down at the corner
+        const tl = stripLine(m(top), 12);
+        const dq = m(drop), dTop = [(dq[0][0] + dq[1][0]) / 2, (dq[0][1] + dq[1][1]) / 2], dBot = [(dq[2][0] + dq[3][0]) / 2, (dq[2][1] + dq[3][1]) / 2];
+        const outer = sx > 0 ? tl : tl.slice().reverse();
+        tube(false, [...outer.slice(0, -1), [lerp(outer[outer.length - 1][0], dTop[0], 0.5), outer[outer.length - 1][1] - 0.006], dTop, [lerp(dTop[0], dBot[0], 0.5), lerp(dTop[1], dBot[1], 0.5)], dBot], Math.min(0.0058, th * 0.13), 0.0105, 'tailLed');
+      }
+      if (hi) S.cover.push(glass(false, m([[xi - 0.012, ty + th * 0.2 + 0.012], [xo + 0.008, ty + th / 2 + 0.012], [xo - 0.004, ty - th / 2 - 0.012], [xi + 0.01, ty - th * 0.2 - 0.012]]), nu * 2, nv));
       lamps.tail.push([sx * (xi + xo) / 2, ty - low, (surfZ(ctx, sx * (xi + xo) / 2, ty, false) ?? ctx.z(0.97)) + 0.03]);
     });
   } else if (tailStyle === 'tri') {
@@ -1538,6 +1669,10 @@ export function carParts(def, custom = {}, hi = true) {
         const xx = tx - 0.11 + k * 0.11;
         const qq = rectQuad(xx - 0.035, xx + 0.035, ty - 0.075, ty + 0.075);
         S.tail.push(faceDecal(ctx, false, sx > 0 ? qq : mirrorQuad(qq), 0.006, 2, 3));
+        if (hi) {
+          tube(false, [[sx * xx, ty + 0.06], [sx * xx, ty], [sx * xx, ty - 0.06]], 0.0065, 0.0105, 'tailLed');
+          S.cover.push(glass(false, sx > 0 ? qq : mirrorQuad(qq), 2, 4));
+        }
       }
       lamps.tail.push([sx * tx, ty - low, (surfZ(ctx, sx * tx, ty, false) ?? ctx.z(0.97)) + 0.03]);
     });
@@ -1552,7 +1687,7 @@ export function carParts(def, custom = {}, hi = true) {
       const m = (q) => (sx > 0 ? q : mirrorQuad(q));
       S.decal.push(faceDecal(ctx, false, m(bz), 0.003, nu, nv));
       S.tail.push(faceDecal(ctx, false, m(qq), 0.006, nu, nv));
-      if (hi) S.cover.push(faceDecal(ctx, false, m(bz), 0.013, nu * 2, nv * 2));
+      if (hi) S.cover.push(glass(false, m(bz), nu * 2, nv * 2));
       if (hi) {
         // smoked lower half, reversing lamp and an LED light-guide line
         const lo = [[xIn + 0.06, ty - 0.004], [xOut - 0.02, ty - 0.004], [xOut - 0.02, ty - th * 0.5 + 0.024], [xIn + 0.09, ty - th * 0.5 + 0.036]];
@@ -1561,7 +1696,13 @@ export function carParts(def, custom = {}, hi = true) {
         S.rev.push(faceDecal(ctx, false, m(rv), 0.009, 2, 1));
         lamps.rev.push([sx * (xIn + 0.046), ty - low, (surfZ(ctx, sx * (xIn + 0.046), ty, false) ?? ctx.z(0.97)) + 0.03]);
         const led = [[xIn + 0.09, ty + th * 0.5 - 0.034], [xOut - 0.018, ty + th * 0.5 - 0.016], [xOut - 0.018, ty + th * 0.5 - 0.026], [xIn + 0.09, ty + th * 0.5 - 0.042]];
-        S.tail.push(faceDecal(ctx, false, m(led), 0.009, 6, 1));
+        // LED signature: a light guide along the top that wraps down the outer edge
+        const lq = m(led), ln = stripLine(lq, 10);
+        const outerEnd = sx > 0 ? ln[ln.length - 1] : ln[0];
+        const path = sx > 0 ? ln : ln.slice().reverse();
+        tube(false, [...path, [outerEnd[0], lerp(outerEnd[1], ty - th * 0.5 + 0.03, 0.5)], [outerEnd[0], ty - th * 0.5 + 0.026]], 0.0052, 0.0105, 'tailLed');
+        // a chrome-backed reversing lamp
+        S.refl.push(onFace(ctx, false, sx * (xIn + 0.046), ty, 0.0068, new THREE.LatheGeometry([0.004, 0.0075, 0.0105, 0.0125].map((r, i) => new THREE.Vector2(r, i * 0.002)), 18)));
       }
       lamps.tail.push([sx * (xIn + xOut) / 2, ty - low, (surfZ(ctx, sx * (xIn + xOut) / 2, ty, false) ?? ctx.z(0.97)) + 0.03]);
     });
@@ -2406,11 +2547,14 @@ uniform int uRoof; uniform int uHood; uniform int uMirror; uniform int uWrap;
 uniform vec3 uColor2; uniform vec3 uWrapColor;
 uniform float uBelt; uniform float uSill; uniform float uSide; uniform float uHoodZ; uniform float uHalfW;
 uniform vec2 uCab; uniform vec3 uMir; uniform vec3 uMirR;
+uniform float uWipeOn; uniform float uWipeZ; uniform vec3 uWipeFrom; uniform vec3 uWipeGlow;
 ${CARBON_GLSL}`)
       .replace('#include <color_fragment>', `#include <color_fragment>
 {
   vec3 P = vObjP; vec3 N = normalize(vObjN);
   vec3 c = diffuseColor.rgb;
+  // respray wipe: the new colour washes over the car from the nose back
+  if (uWipeOn > 0.5 && P.z > uWipeZ) c = uWipeFrom;
   float ax = abs(P.x);
   float topFace = clamp(step(0.3, N.y) + step(0.6, abs(N.z)) * step(uSill + 0.1, P.y), 0.0, 1.0);
   if (uWrap == 1) c = mix(c, uWrapColor, step(0.06, ax) * step(ax, 0.18) * topFace);
@@ -2428,7 +2572,9 @@ ${CARBON_GLSL}`)
   else if (mode == 2) c = vec3(0.012);
   else if (mode == 3) c = carbonWeave(P, N);
   diffuseColor.rgb = c;
-}`);
+}`)
+      .replace('#include <emissivemap_fragment>', `#include <emissivemap_fragment>
+if (uWipeOn > 0.5) totalEmissiveRadiance += uWipeGlow * exp(-pow((vObjP.z - uWipeZ) / 0.05, 2.0)) * 2.6;`);
   };
   const key = mat.customProgramCacheKey?.bind(mat);
   mat.customProgramCacheKey = () => (key ? key() : '') + '|paintRegions';
@@ -2502,6 +2648,12 @@ export function buildPlayerCar(def, custom0, plateText = 'NO HESI') {
     cover: new THREE.MeshStandardMaterial({ color: 0x000000, roughness: 0.03, metalness: 0, envMapIntensity: 1.4, transparent: true, blending: THREE.AdditiveBlending, depthWrite: false }),
     drl: new THREE.MeshStandardMaterial({ color: 0xf4f8ff, emissive: custom.headlights === 'yellow' ? 0xffd860 : custom.headlights === 'xenon' ? 0xcfe0ff : 0xeaf2ff, emissiveIntensity: 1.1, roughness: 0.2 }),
     lens: new THREE.MeshStandardMaterial({ color: 0x0c0f13, roughness: 0.04, metalness: 0.7 }),
+    // 3D lamp units: polished reflector bowls, glass projector lenses (they light up with the lamps),
+    // the black housing lip that seals the glass to the body, and LED light guides in the tail lamps
+    refl: new THREE.MeshStandardMaterial({ color: 0xeef2f6, metalness: 1, roughness: 0.09, envMapIntensity: 1.6, side: THREE.DoubleSide, emissive: headC, emissiveIntensity: 0 }),
+    proj: new THREE.MeshPhysicalMaterial({ color: 0x0e1218, metalness: 0.1, roughness: 0.02, clearcoat: 1, clearcoatRoughness: 0.02, envMapIntensity: 2.4, emissive: headC, emissiveIntensity: 0.03 }),
+    housing: new THREE.MeshStandardMaterial({ color: 0x050607, roughness: 0.3, metalness: 0.25, side: THREE.DoubleSide }),
+    tailLed: new THREE.MeshStandardMaterial({ color: custom.taillights === 'clear' ? 0xc8ccd0 : 0x5c0a06, emissive: 0xff1c12, emissiveIntensity: 0.9, roughness: 0.25, metalness: custom.taillights === 'clear' ? 0.4 : 0 }),
     tail: custom.taillights === 'clear'
       ? new THREE.MeshStandardMaterial({ emissiveMap: taillampTexture(), color: 0xd4d7db, metalness: 0.7, emissive: 0xff2a1a, emissiveIntensity: 0.35, roughness: 0.12 })
       : new THREE.MeshStandardMaterial({ map: taillampTexture(), emissiveMap: taillampTexture(), color: custom.taillights === 'smoked' ? 0x6a6a6a : custom.taillights === 'dark' ? 0x303030 : 0xffffff, emissive: 0xff2a1a, emissiveIntensity: 0.35, roughness: 0.15 }),
@@ -2535,6 +2687,7 @@ export function buildPlayerCar(def, custom0, plateText = 'NO HESI') {
     uMir: { value: mpz ? new THREE.Vector3(mpz.x, mpz.y, mpz.z) : new THREE.Vector3(99, 0, 0) },
     uMirR: { value: mpz ? new THREE.Vector3(mpz.rx * 1.35, mpz.ry * 1.15, mpz.rz * 1.6) : new THREE.Vector3(0.01, 0.01, 0.01) },
     uKitCarbon: { value: 0 },
+    uWipeOn: { value: 0 }, uWipeZ: { value: 0 }, uWipeFrom: { value: new THREE.Color() }, uWipeGlow: { value: new THREE.Color() },
   };
   paintRegions(mats.paint, paintU);
   kitCarbon(mats.kit, paintU);
@@ -2558,7 +2711,7 @@ export function buildPlayerCar(def, custom0, plateText = 'NO HESI') {
     }
     if (['paint', 'cabinTop', 'trim', 'kit', 'body2'].includes(k)) { bakeCarAO(geo, ctx); withCarAO(mats[k]); }
     const m = new THREE.Mesh(geo, mats[k]);
-    m.castShadow = !['glass', 'head', 'head2', 'drl', 'lens', 'tail', 'rev', 'plate', 'interior', 'decal', 'mesh', 'amber', 'amberL', 'amberR', 'cover'].includes(k);
+    m.castShadow = !['glass', 'head', 'head2', 'drl', 'lens', 'tail', 'rev', 'plate', 'interior', 'decal', 'mesh', 'amber', 'amberL', 'amberR', 'cover', 'refl', 'proj', 'housing', 'tailLed'].includes(k);
     m.receiveShadow = ['paint', 'trim', 'kit', 'cabinTop', 'decal', 'mesh', 'interior'].includes(k);
     if (k === 'glass') m.renderOrder = 2;
     if (k === 'cover') m.renderOrder = 3;

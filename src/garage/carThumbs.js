@@ -69,6 +69,8 @@ export class CarThumbs {
     car.mats.head2.emissiveIntensity = 0.15;
     car.mats.drl.emissiveIntensity = 1.6;
     car.mats.tail.emissiveIntensity = 1.4;
+    car.mats.tailLed.emissiveIntensity = 2.6;
+    car.mats.proj.emissiveIntensity = 0.35;
     car.root.rotation.y = ANGLE;
     this.scene.add(car.root);
     car.root.updateMatrixWorld(true);
