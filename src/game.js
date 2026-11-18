@@ -376,6 +376,7 @@ export class Game {
     this.camRig.setMode(attract ? 'cinematic' : this.S.camera || 'chase');
     this.cockpit.setVisible(!attract && this.camRig.mode === 'cockpit');
     this.player.setInteriorDummyVisible(this.camRig.mode !== 'cockpit');
+    if (!attract) this._warmCockpit();
     this.hud.hideBanner();
     if (!attract) {
       this.state = 'playing';
@@ -477,6 +478,80 @@ export class Game {
         this.audio.setCar(this.carDef, this.getCustom(this.carDef.id));
         this.audioDirty = false;
       }
+    }
+  }
+
+  /**
+   * Compile the cockpit's shaders (and the variants its mirror needs) in the background as a run starts, so
+   * the first switch to the cockpit camera doesn't freeze the game while dozens of programs compile.
+   * Uses the browser's parallel shader compile where available; once per car, map and quality.
+   */
+  _warmCockpit() {
+    const ck = this.cockpit, r = this.renderer;
+    const key = `${this._carKey}|${this.env?.id}|${this.S.quality}`;
+    if (!ck.group || this._warmKey === key || this.camRig.mode === 'cockpit') return;
+    this._warmKey = key;
+    const shown = ck.group.visible;
+    const prev = r.getRenderTarget();
+    ck.group.visible = true;
+    // the cockpit view itself (through the post chain, or straight to the screen) and the rear-view mirror
+    const targets = [this.Q.post ? this.postfx.composer.readBuffer : null];
+    if (this.Q.mirror && ck.mirrorRT) targets.push(ck.mirrorRT);
+    try {
+      for (const t of targets) {
+        r.setRenderTarget(t);
+        // start the compiles without waiting on them (the browser builds them in the background if it can)
+        if (r.compileAsync) r.compileAsync(this.scene, this.camera).catch(() => {});
+        else r.compile(this.scene, this.camera);
+      }
+    } finally {
+      r.setRenderTarget(prev);
+      ck.group.visible = shown;
+    }
+    // a moment later, draw the cockpit once off-screen: drivers finish some of the work only at the first real
+    // draw (state- and format-specific variants), and that would otherwise land on the camera switch
+    clearTimeout(this._warmTimer);
+    this._warmTimer = setTimeout(() => {
+      if (this._warmKey === key && this.state === 'playing') this._drawWarm();
+    }, 350);
+  }
+
+  _drawWarm() {
+    const ck = this.cockpit, r = this.renderer, car = this.player;
+    if (!ck.group || this.camRig.mode === 'cockpit') return;
+    const shown = ck.group.visible, vis = ck.visible, frame = ck.frame;
+    const prev = r.getRenderTarget();
+    ck.group.visible = true;
+    car.setInteriorDummyVisible(false);
+    // the cockpit only follows the car while it's in use, so make sure nothing of it is culled for this draw
+    const culled = [];
+    ck.group.traverse((o) => { if (o.frustumCulled) { o.frustumCulled = false; culled.push(o); } });
+    try {
+      if (this.Q.post) {
+        // same kind of target as the post chain renders the scene into
+        const rt = this._warmRT || (this._warmRT = new THREE.WebGLRenderTarget(64, 64, { type: THREE.HalfFloatType }));
+        r.setRenderTarget(rt);
+        r.render(this.scene, this.camera);
+      } else {
+        // straight to the screen, into a single pixel the next frame paints over
+        r.setRenderTarget(null);
+        r.setScissorTest(true);
+        r.setScissor(0, 0, 1, 1);
+        r.render(this.scene, this.camera);
+        r.setScissorTest(false);
+      }
+      if (this.Q.mirror) {
+        ck.visible = true;
+        ck.frame = 1;
+        ck.renderMirror(r, this.scene, car);
+      }
+    } finally {
+      for (const o of culled) o.frustumCulled = true;
+      r.setRenderTarget(prev);
+      ck.group.visible = shown;
+      ck.visible = vis;
+      ck.frame = frame;
+      car.setInteriorDummyVisible(this.camRig.mode !== 'cockpit');
     }
   }
 
