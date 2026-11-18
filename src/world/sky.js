@@ -306,6 +306,8 @@ export class SkySystem {
       tex.wrapS = THREE.RepeatWrapping;
     }
     this.skyline.material.uniforms.arc.value.set(env.skyline.arc[0], env.skyline.arc[1]);
+    // office districts light their windows with cool fluorescent tubes; elsewhere homes glow warm
+    this.skyline.material.uniforms.winColor.value.setRGB(...(env.skylineWindows || [1.0, 0.78, 0.5]));
     this.skyline.visible = env.skyline.density > 0;
     this.mountains.visible = env.mountains.height > 0;
     this.envGround.material.color.setHex(env.terrain.far).multiplyScalar(0.6);
@@ -410,6 +412,10 @@ export class SkySystem {
       const glowC = new THREE.Color(0x26272c).multiplyScalar(cityGlow);
       fog.lerp(new THREE.Color(0x141824).add(glowC.clone().multiplyScalar(0.4)), this.night * 0.6);
     }
+    // blue hour: after sunset the sky over the city turns a deep, saturated blue before it goes dark
+    const bh = (env?.blueHour ?? 0) * smoothstep(1.5, -3, el) * smoothstep(-15, -7.5, el) * (1 - oc * 0.85);
+    this.blueHour = bh;
+    if (bh > 0) fog.lerp(new THREE.Color(0x1f3266), bh * 0.75);
 
     // Light direction: sun by day, moon by night
     const moonDir = new THREE.Vector3(-this.sunDir.x * 0.6 + 0.2, 0.75, -this.sunDir.z * 0.6 - 0.3).normalize();
@@ -435,11 +441,16 @@ export class SkySystem {
 
     // Night glow dome
     const gu = this.glow.material.uniforms;
-    gu.amount.value = this.night * (0.3 + cityGlow * 0.3) + oc * 0.25 * (1 - this.night);
-    gu.horizon.value.setHex(0x2e2d31).multiplyScalar(cityGlow).lerp(new THREE.Color(0x30343c), oc * 0.6);
-    gu.top.value.setHex(0x050914).lerp(new THREE.Color(0x15171c), oc);
+    const ga = this.night * (0.3 + cityGlow * 0.3) + oc * 0.25 * (1 - this.night);
+    gu.amount.value = 1;
+    gu.horizon.value.setHex(env?.nightGlow ?? 0x2e2d31).multiplyScalar(cityGlow).lerp(new THREE.Color(0x30343c), oc * 0.6).multiplyScalar(ga);
+    gu.top.value.setHex(0x050914).lerp(new THREE.Color(0x15171c), oc).multiplyScalar(ga);
+    if (bh > 0) {
+      gu.horizon.value.add(new THREE.Color(0.07, 0.12, 0.42).multiplyScalar(bh));
+      gu.top.value.add(new THREE.Color(0.012, 0.03, 0.2).multiplyScalar(bh));
+    }
 
-    this.stars.material.opacity = this.night * (1 - oc) * (cityGlow > 0.5 ? 0.55 : 1);
+    this.stars.material.opacity = this.night * (1 - oc) * (cityGlow > 0.5 ? 0.55 : 1) * (1 - bh);
     this.moon.material.opacity = smoothstep(0.4, 1, this.night) * (1 - oc * 0.9);
 
     // Clouds

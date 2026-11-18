@@ -1121,6 +1121,19 @@ export class Game {
         G.add(x, y, z, lc.r * f * 0.8, lc.g * f * 0.8, lc.b * f * 0.8, 2.4);
       });
     }
+    // amber delineators on the bends: a pulse runs along them in the direction of travel
+    if (night > 0.15 && this.highway.tokyo) {
+      const k = smoothstep(0.15, 0.6, night);
+      const ox = this.origin.x, oy = this.origin.y;
+      const t = performance.now() / 1000;
+      this.highway.forEachDelin((l) => {
+        const x = l[0] - ox, y = l[2], z = -(l[1] - oy);
+        const ph = (((l[3] * 0.25 - t * 1.6) % 1) + 1) % 1;
+        const p = ph < 0.2 ? 1 - ph / 0.2 : 0;
+        const a = fade(x, y, z) * k * (0.22 + 0.45 * p);
+        G.add(x, y, z, a, a * 0.48, a * 0.04, 0.5 + 0.25 * p);
+      });
+    }
     const car = this.player;
     if (!inside && this.camRig.mode !== 'hood') {
       const brake = car.brakeLight;

@@ -45,7 +45,7 @@ export const ENVIRONMENTS = {
     style: 'shutoko',
     name: 'Tokyo Expressway',
     short: 'TOKYO',
-    desc: 'Elevated Shuto expressway: tight bends between concrete walls, stacked viaducts, tunnels and lit office towers.',
+    desc: 'Elevated Shuto expressway at blue hour: tight bends between concrete walls, stacked viaducts, tunnels and lit office towers.',
     seed: 202,
     lanes: 3,
     outerShoulder: 1.15,
@@ -58,7 +58,7 @@ export const ENVIRONMENTS = {
     wallHeight: 1.3,
     elevated: 13,
     terrain: { near: 0x4c4f53, far: 0x46494d, hill: 0, flat: 0 },
-    lights: { spacing: 16, style: 'jp', color: 0xf4efe2 }, // alternating walls: each side every 32 m
+    lights: { spacing: 16, style: 'jp', color: 0xffe2b8, tunnel: 0xeef2fa }, // warm lamps on alternating walls (each side every 32 m); white tubes in tunnels
     props: {
       palms: 0, trees: 0.12, bushes: 0, cacti: 0, rocks: 0,
       buildings: 1.0, buildingKinds: ['office', 'office', 'mid', 'tower', 'pencil', 'office', 'tall', 'glass'],
@@ -88,7 +88,10 @@ export const ENVIRONMENTS = {
     sky: { turbidity: 4.5, rayleigh: 1.4 },
     fogScale: 0.8,
     clouds: 0.5,
-    defaultTime: 20.6,
+    defaultTime: 19.55, // blue hour
+    blueHour: 1,
+    nightGlow: 0x1c2642,
+    skylineWindows: [0.78, 0.95, 1.0],
   },
   desert: {
     id: 'desert',

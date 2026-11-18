@@ -79,7 +79,7 @@ export class Highway {
       // fade with distance so a light swapping to a new lamp happens where it is already dark
       const d = Math.sqrt(p[0]);
       L.intensity = (this.tokyo ? 58 : 75) * (l[3] === 1 ? Math.max(lit, 0.9) : lit) * (1 - smoothstep(30, 52, d)) * (1 + this.wet * 0.15);
-      L.color.copy(this.lampColor);
+      L.color.copy(l[3] === 1 && this.tunnelColor ? this.tunnelColor : this.lampColor);
       L.position.set(l[0] - ox, l[2] - 0.35, -(l[1] - oy));
       L.target.position.set(L.position.x, l[2] - 10, L.position.z);
       L.target.updateMatrixWorld();
@@ -195,8 +195,9 @@ export class Highway {
   /** Tokyo expressway: light cast concrete, curve stripes, sound walls, tunnel lining, road paint, neon. */
   _buildTokyoMaterials() {
     const env = this.env;
-    const sc = TK.shutokoConcrete(env.seed + 11), st = TK.stripeTexture(), tt = TK.tunnelTexture(), rp = TK.roadPaintTexture(), na = TK.neonAtlas(env.seed + 5);
-    this.textures.push(sc, st, tt, rp, na);
+    const sc = TK.shutokoConcrete(env.seed + 11), st = TK.stripeTexture(), tt = TK.tunnelTexture(), rp = TK.roadPaintTexture(), na = TK.neonAtlas();
+    const hz = TK.hazardTexture(), vm = TK.vmsAtlas();
+    this.textures.push(sc, st, tt, rp, na, hz, vm);
     this.mat.concrete.map = sc;
     this.mat.wall.map = sc;
     this.mat.wall.roughness = 0.88;
@@ -209,8 +210,14 @@ export class Highway {
     this.textures.push(tn);
     this.mat.tunnelName = new THREE.MeshBasicMaterial({ map: tn, color: 0xd8dde4, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -4 });
     this.mat.roadPaint = new THREE.MeshStandardMaterial({ map: rp, transparent: true, depthWrite: false, roughness: 0.55, emissive: 0xffffff, emissiveMap: rp, emissiveIntensity: 0, polygonOffset: true, polygonOffsetFactor: -3, polygonOffsetUnits: -6 });
-    this.mat.neon = new THREE.MeshStandardMaterial({ map: na, emissiveMap: na, emissive: 0xffffff, emissiveIntensity: 0.3, roughness: 0.5 });
-    this.mat.ceilLamp = new THREE.MeshBasicMaterial({ color: new THREE.Color(env.lights.color).multiplyScalar(0.3), toneMapped: false });
+    // company signs on the office roofs (lightboxes, lit after dusk)
+    this.mat.neon = new THREE.MeshStandardMaterial({ map: na, emissiveMap: na, emissive: 0xffffff, emissiveIntensity: 0.25, roughness: 0.5 });
+    this.tunnelColor = new THREE.Color(env.lights.tunnel ?? env.lights.color);
+    this.mat.ceilLamp = new THREE.MeshBasicMaterial({ color: this.tunnelColor.clone().multiplyScalar(0.3), toneMapped: false });
+    this.mat.hazard = new THREE.MeshStandardMaterial({ map: hz, roughness: 0.6, side: THREE.DoubleSide, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -4 });
+    // LED info boards and the amber delineator lamps along bends
+    this.mat.vms = new THREE.MeshBasicMaterial({ map: vm, color: 0xffffff });
+    this.mat.delin = new THREE.MeshBasicMaterial({ color: 0xffa21c, toneMapped: false });
   }
 
   _buildPools() {
@@ -370,7 +377,7 @@ export class Highway {
       // cap beams (fixed size) sit on top of the columns
       P.tcap = new PropPool(scene, [{ geometry: new THREE.BoxGeometry(half, 1.8, 2.6).translate(0, -0.9, 0), material: this.mat.concrete }], 160);
       // pools of light on the lanes in tunnels and under double decks (lit day and night)
-      this.tunnelPoolMat = new THREE.MeshBasicMaterial({ map: this.poolTex, color: lampColor, transparent: true, opacity: 0.34, depthWrite: false, blending: THREE.AdditiveBlending, polygonOffset: true, polygonOffsetFactor: -4, polygonOffsetUnits: -8 });
+      this.tunnelPoolMat = new THREE.MeshBasicMaterial({ map: this.poolTex, color: this.tunnelColor || lampColor, transparent: true, opacity: 0.34, depthWrite: false, blending: THREE.AdditiveBlending, polygonOffset: true, polygonOffsetFactor: -4, polygonOffsetUnits: -8 });
       P.tunnelPool = new PropPool(scene, [{ geometry: new THREE.PlaneGeometry(1, 1).rotateX(-Math.PI / 2), material: this.tunnelPoolMat }], 160);
       // ceiling lamps under double-deck sections
       P.ceilLamp = new PropPool(scene, [
@@ -456,6 +463,19 @@ export class Highway {
       back.castShadow = this.castPropShadows;
       g.add(holder);
       g.userData.signs.push({ holder, face });
+    }
+    // LED information board (traffic, travel times, warnings), shown instead of the route signs on some gantries
+    {
+      const vms = new THREE.Group();
+      const back = new THREE.Mesh(new THREE.BoxGeometry(8.3, 1.5, 0.5), this.mat.signBack);
+      back.position.z = -0.15;
+      const face = new THREE.Mesh(new THREE.PlaneGeometry(7.8, 0.975), this.mat.vms);
+      face.position.z = 0.11;
+      vms.add(back, face);
+      vms.position.set(L.laneCenter(1), H - 0.35, 0.6);
+      vms.visible = false;
+      g.add(vms);
+      g.userData.vms = { group: vms, face, row: -1 };
     }
     this.group.add(g);
     return g;
@@ -649,7 +669,7 @@ export class Highway {
     const anchor = { ...road.sample(s0) };
     const rows = [];
     for (let r = 0; r <= ROWS; r++) rows.push({ ...road.sample(s0 + r * DS), s: s0 + r * DS });
-    const ch = { k, anchor, group: new THREE.Group(), meshes: [], props: [], objs: [], lamps: [] };
+    const ch = { k, anchor, group: new THREE.Group(), meshes: [], props: [], objs: [], lamps: [], delin: [] };
     const toLocal = (row, d, h, out, o) => {
       const c = Math.cos(row.H), sn = Math.sin(row.H);
       out[o] = row.X + c * d - anchor.X;
@@ -959,35 +979,53 @@ export class Highway {
   _tokyoWalls(ch, rows, toLocal, vBase) {
     const L = this.layout, env = this.env, H = env.wallHeight;
     const P0 = [0, 0, 0];
-    // curve stripes: band on the road face of the wall on the outside of the bend
+    // bends: red chevrons low on the outside wall, a yellow-and-black band along its top on the tighter
+    // ones, and amber delineator lamps on the wall top that pulse in sequence round the bend at night
     {
-      const v = [], u = [], idx = [];
-      const kTh = 1 / 1500;
+      const v = [], u = [], idx = [], hv = [], hu = [], hidx = [], dg = [];
+      const kTh = 1 / 1500, kHz = 1 / 1050;
+      const band = (V, U, I, a, b, d, y0, y1, ua, ub, side) => {
+        const base = V.length / 3;
+        for (const [row, yy, uu, vv] of [[a, y0, ua, 0], [a, y1, ua, 1], [b, y0, ub, 0], [b, y1, ub, 1]]) {
+          toLocal(row, d, yy, P0, 0);
+          V.push(P0[0], P0[1], P0[2]);
+          U.push(uu, vv);
+        }
+        if (side > 0) I.push(base, base + 2, base + 1, base + 1, base + 2, base + 3);
+        else I.push(base, base + 1, base + 2, base + 1, base + 3, base + 2);
+      };
       for (let r = 0; r < ROWS; r++) {
         const a = rows[r], b = rows[r + 1];
         const k = (a.K + b.K) / 2;
         if (Math.abs(k) < kTh) continue;
+        const inTrench = this.trenchAt(a.s) > 0 || this.coverAt(a.s).kind === 'tunnel';
         // turning right (K > 0) puts the outside of the bend on the left
-        for (const side of k > 0 ? [-1] : [1]) {
-          const d = side * (L.wallD - 0.215);
-          const base = v.length / 3;
-          for (const [row, yy, vv] of [[a, 0.48, 0], [a, H - 0.04, 1], [b, 0.48, 0], [b, H - 0.04, 1]]) {
-            toLocal(row, d, yy, P0, 0);
-            v.push(P0[0], P0[1], P0[2]);
-            u.push(row.s / 3.2, vv);
-          }
-          if (side > 0) idx.push(base, base + 2, base + 1, base + 1, base + 2, base + 3);
-          else idx.push(base, base + 1, base + 2, base + 1, base + 3, base + 2);
+        const side = k > 0 ? -1 : 1;
+        const d = side * (L.wallD - 0.215);
+        // arrows point the way the traffic beside that wall is going
+        band(v, u, idx, a, b, d, 0.32, H - 0.44, side * a.s / 3.2, side * b.s / 3.2, side);
+        if (Math.abs(k) > kHz && !inTrench) band(hv, hu, hidx, a, b, d, H - 0.34, H - 0.03, a.s / 2, b.s / 2, side);
+        // a delineator every 10 m along the wall top
+        const n0 = Math.floor(a.s / 10), n1 = Math.floor(b.s / 10);
+        if (n1 !== n0 && !inTrench) {
+          const row = b;
+          const dd = side * (L.wallD - 0.08);
+          toLocal(row, dd, H + 0.1, P0, 0);
+          dg.push(new THREE.BoxGeometry(0.14, 0.14, 0.24).rotateY(-row.H).translate(P0[0], P0[1], P0[2]));
+          const c2 = Math.cos(row.H), sn = Math.sin(row.H);
+          ch.delin.push([row.X + c2 * dd, row.Y - sn * dd, row.E + H + 0.14, n1 * side]);
         }
       }
       if (idx.length) ch.meshes.push(this._mesh(new Float32Array(v), new Float32Array(u), null, idx, this.mat.stripe, { receive: true }));
+      if (hidx.length) ch.meshes.push(this._mesh(new Float32Array(hv), new Float32Array(hu), null, hidx, this.mat.hazard, { receive: true }));
+      if (dg.length) ch.meshes.push(new THREE.Mesh(merge(dg), this.mat.delin));
     }
     // sound walls: long stretches of glazed panels on steel posts above the parapet
     {
       const v = [], u = [], idx = [], posts = [];
       const top = H + 3.4;
       for (const side of [1, -1]) {
-        const on = (row) => noise2(row.s * 0.0022, side * 5.3, 91) > 0.12 && !this.coverAt(row.s).kind;
+        const on = (row) => noise2(row.s * 0.0022, side * 5.3, 91) > 0.12 && !this.coverAt(row.s).kind && !this.trenchAt(row.s);
         for (let r = 0; r < ROWS; r++) {
           const a = rows[r], b = rows[r + 1];
           if (!on(a) || !on(b)) continue;
@@ -1037,20 +1075,23 @@ export class Highway {
   }
 
   /**
-   * Shop and company signs on a Tokyo building facing the expressway: vertical tate-kanban sticking out of
-   * the facade (readable by approaching traffic) and boards on the roof. Collected per chunk into one mesh.
+   * Company signs on a Tokyo office block beside the expressway: a lit lightbox on a steel frame on the roof,
+   * or the company's name high up on the facade facing the road. Not every building has one; no shop neon.
+   * Collected per chunk into one mesh.
    */
   _shopSigns(ch, rng, kind, s, side, dist, bw, bd, ground, bh) {
     const top = ground + bh; // building top relative to the road
-    if (top < 6) return;
+    if (top < 14 || kind === 'apartment') return;
     const an = ch.anchor, Q = {};
     const list = ch.signGeo || (ch.signGeo = []);
+    // atlas: 2 columns x 4 rows of 2:1 signs
     const cellUV = (g, faces, cell) => {
       const uv = g.attributes.uv;
-      const cu = (cell % 4) * 0.25, cv = 1 - (Math.floor(cell / 4) + 1) * 0.25;
+      const cu = (cell % 2) * 0.5, cv = 1 - (Math.floor(cell / 2) + 1) * 0.25;
+      const n = uv.count / 6;
       for (let f = 0; f < 6; f++) {
-        for (let i = f * 4; i < f * 4 + 4; i++) {
-          if (faces.includes(f)) uv.setXY(i, cu + 0.006 + uv.getX(i) * 0.238, cv + 0.006 + uv.getY(i) * 0.238);
+        for (let i = f * n; i < f * n + n; i++) {
+          if (faces.includes(f)) uv.setXY(i, cu + 0.004 + uv.getX(i) * 0.492, cv + 0.004 + uv.getY(i) * 0.242);
           else uv.setXY(i, cu + 0.002, cv + 0.002);
         }
       }
@@ -1062,26 +1103,26 @@ export class Highway {
       list.push(g);
     };
     const face = dist - bw / 2; // the facade toward the road
-    // vertical signs, perpendicular to the facade (their faces look along the road)
-    const nv = kind === 'pencil' ? 1 : rng() < 0.7 ? 1 + (rng() < 0.4 ? 1 : 0) : 0;
-    for (let i = 0; i < nv; i++) {
-      const hgt = kind === 'pencil' ? Math.min(top - 2, 16 + rng() * 8) : 8 + rng() * 8;
-      const y0 = Math.max(ground + 4, -2 + rng() * 5);
-      if (y0 + hgt > top - 1) continue;
-      const g = new THREE.BoxGeometry(2.4, hgt, 0.5);
-      cellUV(g, [4, 5], Math.floor(rng() * 8));
-      place(g, s + (rng() - 0.5) * bd * 0.7, side * (face - 1.25), y0 + hgt / 2);
-    }
-    // rooftop board facing the road
-    if (rng() < (kind === 'pencil' ? 0.3 : 0.65) && top < 75) {
-      const len = Math.min(20, bd * 0.85), hh = 4 + rng() * 2.2;
+    const cell = Math.floor(rng() * 8);
+    const roll = rng();
+    if (roll < 0.3 && top < 70) {
+      // rooftop lightbox on a frame, facing the road
+      const len = Math.min(15, bd * 0.75), hh = len / 2.3;
       const g = new THREE.BoxGeometry(0.4, hh, len);
-      cellUV(g, [0, 1], 8 + Math.floor(rng() * 8));
-      place(g, s + (rng() - 0.5) * (bd - len) * 0.5, side * (face + 1.5), top + 1.4 + hh / 2);
-      // steel frame under it
-      const fr = new THREE.BoxGeometry(0.3, 1.6, len * 0.9);
-      cellUV(fr, [], 0);
-      place(fr, s, side * (face + 1.5), top + 0.8);
+      cellUV(g, [0, 1], cell);
+      place(g, s + (rng() - 0.5) * (bd - len) * 0.4, side * (face + 1.8), top + 1.6 + hh / 2);
+      const fr = [];
+      for (const z of [-0.4, 0, 0.4]) fr.push(new THREE.BoxGeometry(0.25, 1.6, 0.25).translate(0, 0, z * len));
+      fr.push(new THREE.BoxGeometry(0.3, 0.2, len * 0.95).translate(0, 0.7, 0));
+      const fg = merge(fr);
+      cellUV(fg, [], 0);
+      place(fg, s, side * (face + 1.8), top + 0.8);
+    } else if (roll < 0.48 && top > 26) {
+      // the company name up at the top of the facade
+      const len = Math.min(16, bd * 0.7), hh = len / 2.3;
+      const g = new THREE.BoxGeometry(0.25, hh, len);
+      cellUV(g, [0, 1], cell);
+      place(g, s + (rng() - 0.5) * (bd - len) * 0.3, side * (face - 0.2), top - hh / 2 - 1.2);
     }
   }
 
@@ -1122,6 +1163,28 @@ export class Highway {
   /** Tunnels and double-deck sections that overlap this chunk. */
   _tokyoCovers(ch, rows, toLocal) {
     const s0 = rows[0].s, s1 = rows[ROWS].s;
+    // cutting walls on tunnel approaches: tiles and stained concrete climbing to the portal
+    {
+      let a = -1;
+      const flush = (r0, r1) => {
+        if (r1 <= r0) return;
+        const L = this.layout, H = this.env.wallHeight, W = L.wallD;
+        const S = (prof, mat, o) => this._sheet(ch, rows, toLocal, r0, r1, prof, mat, o);
+        const top = (row) => this.trenchAt(row.s) || H + 0.06;
+        const lin = { uS: 0.25, vY: [H + 0.06, 6.6] };
+        S((row) => [[W - 0.22, H + 0.06], [W - 0.22, top(row)]], this.mat.tunnel, { ...lin, flip: true });
+        S((row) => [[-(W - 0.22), H + 0.06], [-(W - 0.22), top(row)]], this.mat.tunnel, lin);
+        S((row) => [[W - 0.22, top(row)], [W + 0.27, top(row)]], this.mat.concrete, { uS: 0.12, vS: 0.12, flip: true });
+        S((row) => [[-(W + 0.27), top(row)], [-(W - 0.22), top(row)]], this.mat.concrete, { uS: 0.12, vS: 0.12, flip: true });
+        S((row) => [[W + 0.27, -2.6], [W + 0.27, top(row)]], this.mat.concrete, { uS: 0.12, vS: 0.12 });
+        S((row) => [[-(W + 0.27), -2.6], [-(W + 0.27), top(row)]], this.mat.concrete, { uS: 0.12, vS: 0.12, flip: true });
+      };
+      for (let r = 0; r <= ROWS; r++) {
+        const on = this.trenchAt(rows[r].s) > 0 && !this._inCover(rows[r].s, 0);
+        if (on && a < 0) a = Math.max(0, r - 1);
+        if ((!on || r === ROWS) && a >= 0) { flush(a, on ? r : Math.min(ROWS, r)); a = -1; }
+      }
+    }
     for (const c of this.covers) {
       if (c.s1 < s0 || c.s0 > s1) continue;
       const r0 = Math.max(0, Math.floor((c.s0 - s0) / DS)), r1 = Math.min(ROWS, Math.ceil((c.s1 - s0) / DS));
@@ -1135,18 +1198,20 @@ export class Highway {
    * A surface swept along rows r0..r1 through a cross-section polyline [[d, h], ...]. uv: u runs along the
    * road (uS per metre), v along the cross-section (vS per metre), unless `along` swaps them.
    */
-  _sheet(ch, rows, toLocal, r0, r1, prof, mat, { uS = 0.25, vS = 0.25, flip = false, cast = false, vFit = false } = {}) {
-    const np = prof.length, n = r1 - r0 + 1;
+  _sheet(ch, rows, toLocal, r0, r1, profIn, mat, { uS = 0.25, vS = 0.25, flip = false, cast = false, vFit = false, vY = null } = {}) {
+    const profAt = typeof profIn === 'function' ? profIn : () => profIn;
+    const np = profAt(rows[r0]).length, n = r1 - r0 + 1;
     const pos = new Float32Array(n * np * 3), uv = new Float32Array(n * np * 2), idx = [];
-    const plen = [0];
-    for (let p = 1; p < np; p++) plen.push(plen[p - 1] + Math.hypot(prof[p][0] - prof[p - 1][0], prof[p][1] - prof[p - 1][1]));
     for (let r = r0; r <= r1; r++) {
       const j = r - r0;
+      const prof = profAt(rows[r]);
+      const plen = [0];
+      for (let p = 1; p < np; p++) plen.push(plen[p - 1] + Math.hypot(prof[p][0] - prof[p - 1][0], prof[p][1] - prof[p - 1][1]));
       for (let p = 0; p < np; p++) {
         const i = j * np + p;
         toLocal(rows[r], prof[p][0], prof[p][1], pos, i * 3);
         uv[i * 2] = rows[r].s * uS;
-        uv[i * 2 + 1] = vFit ? plen[p] / plen[np - 1] : plen[p] * vS;
+        uv[i * 2 + 1] = vY ? (prof[p][1] - vY[0]) / (vY[1] - vY[0]) : vFit ? plen[p] / plen[np - 1] : plen[p] * vS;
         if (j < n - 1 && p < np - 1) {
           const a = i, b = i + 1, c = i + np, d = i + np + 1;
           if (flip) idx.push(a, c, b, b, c, d); else idx.push(a, b, c, b, d, c);
@@ -1393,7 +1458,20 @@ export class Highway {
       if (f.type === 'gantry' && this.tokyo) {
         const r = mulberry32(f.seed);
         const signs = obj.userData.signs;
-        const n = r() < 0.35 ? 1 : 2;
+        const pick = r();
+        const vms = obj.userData.vms;
+        const info = pick < 0.3;
+        const n = info ? 0 : pick < 0.52 ? 1 : 2;
+        vms.group.visible = info;
+        if (info) {
+          const row = Math.floor(r() * 4);
+          if (vms.row !== row) {
+            vms.row = row;
+            const uv = vms.face.geometry.attributes.uv;
+            for (let i = 0; i < uv.count; i++) uv.setY(i, 1 - (row + 1 - (i < 2 ? 1 : 0)) / 4);
+            uv.needsUpdate = true;
+          }
+        }
         signs.forEach((sg, i) => {
           sg.holder.visible = i < n;
           if (i >= n) return;
@@ -1635,6 +1713,28 @@ export class Highway {
     for (const ch of this.chunks.values()) for (const l of ch.lamps) fn(l);
   }
 
+  /** Iterate amber delineator lamps on bends: [X, Y, E, index along the bend] (absolute). */
+  forEachDelin(fn) {
+    for (const ch of this.chunks.values()) for (const l of ch.delin) fn(l);
+  }
+
+  /**
+   * Height of the cutting walls on the approach to a tunnel (0 outside): the walls climb from the parapet
+   * to the portal over the last 150 m, so tunnels open out of a trench like the Shuto's underground sections.
+   */
+  trenchAt(s) {
+    if (!this.covers) return 0;
+    const TR = 150, H = this.env.wallHeight, top = 6.6 + 0.7;
+    for (const c of this.covers) {
+      if (c.kind !== 'tunnel') continue;
+      let t = -1;
+      if (s >= c.s0 - TR && s < c.s0) t = (s - (c.s0 - TR)) / TR;
+      else if (s > c.s1 && s <= c.s1 + TR) t = 1 - (s - c.s1) / TR;
+      if (t >= 0) return H + (top - H) * smoothstep(0, 1, t);
+    }
+    return 0;
+  }
+
   /** Lighting state from sky/weather. */
   setAmbient(night, wet) {
     this.night = night;
@@ -1653,7 +1753,9 @@ export class Highway {
     if (this.tokyo) {
       this.mat.neon.emissiveIntensity = 0.3 + lit * 1.7;
       this.mat.roadPaint.emissiveIntensity = lit * 0.05;
-      this.mat.ceilLamp.color.copy(this.lampColor).multiplyScalar(1.6);
+      this.mat.ceilLamp.color.copy(this.tunnelColor).multiplyScalar(1.6);
+      this.mat.delin.color.setHex(0xffa21c).multiplyScalar(lerp(0.7, 2.6, lit));
+      this.mat.vms.color.setScalar(lerp(1.05, 1.5, lit));
       this.mat.soffit.color.setHex(0x8d8f90).multiplyScalar(1 - wet * 0.2);
     }
     this.mat.marking.emissive.setScalar(lit * 0.06);

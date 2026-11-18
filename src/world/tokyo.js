@@ -154,21 +154,38 @@ export function jpSignTexture(spec, seed = 1) {
 }
 
 /* ------------------------------------------------------------ walls */
-/** Red and white diagonal stripes painted along the walls on bends. */
+/** Red chevron arrows on white, painted low along the outside wall of a bend (they point the way round it). */
 export function stripeTexture() {
   const c = canvas(256, 64), x = c.getContext('2d');
   x.fillStyle = '#efefe9';
   x.fillRect(0, 0, 256, 64);
   x.fillStyle = '#c8202e';
-  for (let i = -2; i < 6; i++) {
+  for (let i = 0; i < 4; i++) {
+    const x0 = i * 64 + 8;
     x.beginPath();
-    x.moveTo(i * 64, 64); x.lineTo(i * 64 + 32, 64); x.lineTo(i * 64 + 96, 0); x.lineTo(i * 64 + 64, 0);
+    x.moveTo(x0, 6); x.lineTo(x0 + 22, 6); x.lineTo(x0 + 48, 32); x.lineTo(x0 + 22, 58); x.lineTo(x0, 58); x.lineTo(x0 + 26, 32);
     x.closePath(); x.fill();
   }
-  // grime along the bottom edge
   const g = x.createLinearGradient(0, 0, 0, 64);
-  g.addColorStop(0, 'rgba(0,0,0,0)'); g.addColorStop(1, 'rgba(40,30,20,0.18)');
+  g.addColorStop(0, 'rgba(0,0,0,0)'); g.addColorStop(1, 'rgba(40,30,20,0.2)');
   x.fillStyle = g; x.fillRect(0, 0, 256, 64);
+  return tex(c, { repeat: true });
+}
+
+/** Yellow and black diagonal hazard band along the top of the wall on sharp bends. */
+export function hazardTexture() {
+  const c = canvas(128, 32), x = c.getContext('2d');
+  x.fillStyle = '#f2c21a';
+  x.fillRect(0, 0, 128, 32);
+  x.fillStyle = '#16140f';
+  for (let i = -1; i < 5; i++) {
+    x.beginPath();
+    x.moveTo(i * 32, 32); x.lineTo(i * 32 + 16, 32); x.lineTo(i * 32 + 48, 0); x.lineTo(i * 32 + 32, 0);
+    x.closePath(); x.fill();
+  }
+  const g = x.createLinearGradient(0, 0, 0, 32);
+  g.addColorStop(0, 'rgba(0,0,0,0.12)'); g.addColorStop(0.3, 'rgba(0,0,0,0)'); g.addColorStop(1, 'rgba(30,25,15,0.25)');
+  x.fillStyle = g; x.fillRect(0, 0, 128, 32);
   return tex(c, { repeat: true });
 }
 
@@ -196,19 +213,60 @@ export function shutokoConcrete(seed = 1) {
   return tex(c, { repeat: true });
 }
 
-/** Tunnel lining: cream enamel panels above a darker grimy band, with a maintenance stripe. */
+/**
+ * Tunnel and cutting lining, as on the Shuto: small white tiles up to about head height, dark board-formed
+ * concrete above with water stains, and a pair of service pipes and a cable tray running along the wall.
+ * v = 0 is the top of the parapet, v = 1 is 5.3 m above it; u repeats every 4 m.
+ */
 export function tunnelTexture() {
-  const W = 256, H = 256, c = canvas(W, H), x = c.getContext('2d');
-  x.fillStyle = '#d8d4c8'; x.fillRect(0, 0, W, H);
-  // panel grid
-  x.strokeStyle = 'rgba(80,78,70,0.35)'; x.lineWidth = 2;
-  for (let px = 0; px <= W; px += 64) { x.beginPath(); x.moveTo(px, 0); x.lineTo(px, H); x.stroke(); }
-  for (let py = 0; py <= H * 0.62; py += 48) { x.beginPath(); x.moveTo(0, py); x.lineTo(W, py); x.stroke(); }
-  // lower band, dirtier from spray
-  const g = x.createLinearGradient(0, H * 0.62, 0, H);
-  g.addColorStop(0, '#9b978c'); g.addColorStop(1, '#5d5a54');
-  x.fillStyle = g; x.fillRect(0, H * 0.62, W, H * 0.38);
-  x.fillStyle = '#2f6b45'; x.fillRect(0, H * 0.6, W, 6);
+  const W = 256, H = 512, c = canvas(W, H), x = c.getContext('2d');
+  const rng = mulberry32(31);
+  const tileTop = H * 0.56; // canvas y where the tiles stop (about 2.3 m up)
+  // board-formed concrete
+  x.fillStyle = '#7a7975'; x.fillRect(0, 0, W, tileTop);
+  for (let i = 0; i < 1600; i++) {
+    const v = 95 + rng() * 45;
+    x.fillStyle = `rgba(${v},${v},${v - 3},${0.06 + rng() * 0.1})`;
+    x.fillRect(rng() * W, rng() * tileTop, 2 + rng() * 8, 1 + rng() * 3);
+  }
+  x.fillStyle = 'rgba(40,40,38,0.28)';
+  for (let py = 14; py < tileTop; py += 22) x.fillRect(0, py, W, 1);
+  for (let i = 0; i < 26; i++) {
+    const sx = rng() * W, len = 40 + rng() * 160;
+    const g = x.createLinearGradient(0, 0, 0, len);
+    g.addColorStop(0, `rgba(35,33,30,${0.2 + rng() * 0.25})`); g.addColorStop(1, 'rgba(35,33,30,0)');
+    x.fillStyle = g; x.fillRect(sx, 0, 1 + rng() * 4, len);
+  }
+  // service pipes and a cable tray
+  const pipe = (y, r, base) => {
+    const g = x.createLinearGradient(0, y - r, 0, y + r);
+    g.addColorStop(0, base); g.addColorStop(0.35, '#d9d9d4'); g.addColorStop(1, '#3d3c39');
+    x.fillStyle = g; x.fillRect(0, y - r, W, r * 2);
+    x.fillStyle = 'rgba(0,0,0,0.35)'; x.fillRect(0, y + r, W, 3);
+    x.fillStyle = 'rgba(30,30,28,0.55)';
+    for (let px = 20; px < W; px += 64) x.fillRect(px, y - r - 3, 6, r * 2 + 6);
+  };
+  pipe(tileTop * 0.42, 7, '#9a9994');
+  pipe(tileTop * 0.55, 5, '#8c8b86');
+  x.fillStyle = '#4a4946'; x.fillRect(0, tileTop * 0.72, W, 10);
+  x.fillStyle = 'rgba(255,255,255,0.15)'; x.fillRect(0, tileTop * 0.72, W, 2);
+  // tiles: 0.25 m squares (16 px across, 24 px down at this scale)
+  x.fillStyle = '#e9e9e4'; x.fillRect(0, tileTop, W, H - tileTop);
+  for (let ty = tileTop; ty < H; ty += 24) {
+    for (let tx = 0; tx < W; tx += 16) {
+      const v = 226 + rng() * 18;
+      x.fillStyle = `rgb(${v},${v},${v - 4})`;
+      x.fillRect(tx + 1, ty + 1, 14, 22);
+    }
+  }
+  x.fillStyle = 'rgba(120,118,110,0.5)';
+  for (let ty = tileTop; ty < H; ty += 24) x.fillRect(0, ty, W, 1);
+  for (let tx = 0; tx < W; tx += 16) x.fillRect(tx, tileTop, 1, H - tileTop);
+  // a dark edge where the tiles meet the concrete, and road grime creeping up from below
+  x.fillStyle = '#55544f'; x.fillRect(0, tileTop - 3, W, 5);
+  const gr = x.createLinearGradient(0, H * 0.82, 0, H);
+  gr.addColorStop(0, 'rgba(60,56,48,0)'); gr.addColorStop(1, 'rgba(60,56,48,0.45)');
+  x.fillStyle = gr; x.fillRect(0, H * 0.82, W, H * 0.18);
   return tex(c, { repeat: true });
 }
 
@@ -252,49 +310,90 @@ export function tunnelNameTexture() {
   return tex(c);
 }
 
-/* ------------------------------------------------------------ neon & shop signs */
-const NEON_JP = ['ホテル', 'カラオケ', 'ラーメン', '居酒屋', '駐車場', '焼肉', '寿司', 'ゲーム', '薬局', '24時間', '不動産', '歯科', '中古車', 'カフェ', 'ビジネスホテル', '電器', '英会話', '整骨院'];
-const NEON_EN = ['HOTEL', 'KARAOKE', 'RAMEN', 'BAR', 'PARKING', 'SUSHI', 'GAMES', 'PHARMACY', '24H', 'CAFE', 'DENTAL', 'CARS'];
-const NEON_COLS = ['#ff3b5c', '#29d8ff', '#ffd23a', '#ff7a1a', '#7cff6b', '#ff4fd8', '#ffffff', '#4f7dff'];
+/* ------------------------------------------------------------ company signs & info boards */
+// Fictional companies. Office districts along the Shuto carry lit company names on their roofs and up
+// at the top of their facades, rather than shop neon.
+const CORP = [
+  { jp: '東都証券', en: 'TOHTO SECURITIES', bg: '#f4f6f8', fg: '#16306e', sub: '#c8202e' },
+  { jp: '千代田生命', en: 'CHIYODA LIFE', bg: '#1b3f8f', fg: '#ffffff', sub: '#9fc4ff' },
+  { jp: '中央信託銀行', en: 'CHUO TRUST BANK', bg: '#f4f6f8', fg: '#c8202e', sub: '#16306e' },
+  { jp: '京浜商事', en: 'KEIHIN TRADING', bg: '#0f6b4a', fg: '#ffffff', sub: '#b9f0d6' },
+  { jp: '日東電機', en: 'NITTO ELECTRIC', bg: '#f4f6f8', fg: '#1d5fc4', sub: '#1d5fc4' },
+  { jp: '新橋産業', en: 'SHINBASHI SANGYO', bg: '#c8202e', fg: '#ffffff', sub: '#ffd0d0' },
+  { jp: '東邦海運', en: 'TOHO KAIUN', bg: '#f4f6f8', fg: '#0d4c7a', sub: '#2a8bc9' },
+  { jp: '光陽ホテル', en: 'KOYO HOTEL', bg: '#141a24', fg: '#e8eef6', sub: '#f2c230' },
+];
 
-/**
- * Atlas of shop signs (4 columns x 4 rows): vertical tate-kanban (tall cells) and horizontal rooftop boards.
- * Colour and emissive share the canvas (signs are mostly light).
- */
-export function neonAtlas(seed = 1) {
+/** Company signs: 2 columns x 4 rows of 2:1 lightboxes. */
+export function neonAtlas() {
   const W = 1024, H = 1024, c = canvas(W, H), x = c.getContext('2d');
-  const rng = mulberry32(seed);
   const jp = canDrawJapanese();
-  const words = jp ? NEON_JP : NEON_EN;
-  x.fillStyle = '#0a0a0c'; x.fillRect(0, 0, W, H);
   x.textAlign = 'center'; x.textBaseline = 'middle';
-  for (let i = 0; i < 16; i++) {
-    const cx0 = (i % 4) * 256, cy0 = Math.floor(i / 4) * 256;
-    const vertical = i < 8; // first two rows: tall boards drawn top-to-bottom
-    const col = NEON_COLS[Math.floor(rng() * NEON_COLS.length)];
-    const word = words[Math.floor(rng() * words.length)];
-    const boxed = rng() < 0.55;
-    if (boxed) {
-      // lightbox: coloured panel with dark lettering
-      x.fillStyle = col; x.fillRect(cx0 + 8, cy0 + 8, 240, 240);
-      x.fillStyle = 'rgba(255,255,255,0.25)'; x.fillRect(cx0 + 8, cy0 + 8, 240, 30);
-      x.fillStyle = '#121214';
+  CORP.forEach((co, i) => {
+    const cx0 = (i % 2) * 512, cy0 = Math.floor(i / 2) * 256;
+    x.fillStyle = '#0c0d10'; x.fillRect(cx0, cy0, 512, 256);
+    x.fillStyle = co.bg; x.fillRect(cx0 + 6, cy0 + 6, 500, 244);
+    // the glow of the tubes behind the face: brighter in the middle
+    const g = x.createRadialGradient(cx0 + 256, cy0 + 128, 20, cx0 + 256, cy0 + 128, 300);
+    g.addColorStop(0, 'rgba(255,255,255,0.18)'); g.addColorStop(1, 'rgba(0,0,0,0.12)');
+    x.fillStyle = g; x.fillRect(cx0 + 6, cy0 + 6, 500, 244);
+    // logo mark
+    x.fillStyle = co.sub;
+    x.beginPath(); x.arc(cx0 + 62, cy0 + 112, 34, 0, Math.PI * 2); x.fill();
+    x.fillStyle = co.bg;
+    x.beginPath(); x.arc(cx0 + 62, cy0 + 112, 16, 0, Math.PI * 2); x.fill();
+    x.fillStyle = co.fg;
+    if (jp) {
+      x.font = `bold 118px ${JP_FONT}`;
+      fitText(x, co.jp, cx0 + 290, cy0 + 108, 380);
+      x.font = `600 30px ${EN_FONT}`;
+      fitText(x, co.en, cx0 + 290, cy0 + 205, 380);
     } else {
-      x.fillStyle = '#141418'; x.fillRect(cx0 + 8, cy0 + 8, 240, 240);
-      x.shadowColor = col; x.shadowBlur = 18;
-      x.fillStyle = col;
+      x.font = `bold 92px ${EN_FONT}`;
+      fitText(x, co.en, cx0 + 290, cy0 + 128, 390);
     }
-    if (vertical && jp) {
-      const chars = word.split('').slice(0, 5);
-      const step = 232 / chars.length;
-      x.font = `bold ${Math.min(150, step * 0.95)}px ${JP_FONT}`;
-      chars.forEach((ch, k) => fitText(x, ch, cx0 + 128, cy0 + 12 + step * (k + 0.5), 230));
-    } else {
-      x.font = `bold ${jp ? 96 : 110}px ${jp ? JP_FONT : EN_FONT}`;
-      fitText(x, word, cx0 + 128, cy0 + 128, 228);
-    }
-    x.shadowBlur = 0;
-  }
+  });
+  return tex(c);
+}
+
+// Variable message boards: amber, red or green LED characters on black.
+const VMS = [
+  { jp: ['この先 渋滞 3km', '霞が関 15分'], en: ['CONGESTION AHEAD 3km', 'KASUMIGASEKI 15 min'], col: '#ffa31a' },
+  { jp: ['湾岸線 順調', '空港中央 12分'], en: ['BAYSHORE ROUTE CLEAR', 'AIRPORT 12 min'], col: '#3cff6a' },
+  { jp: ['速度落とせ', '事故多発'], en: ['SLOW DOWN', 'ACCIDENT ZONE'], col: '#ff3b2e' },
+  { jp: ['工事中', '左車線 規制'], en: ['ROADWORKS', 'LEFT LANE CLOSED'], col: '#ffa31a' },
+];
+
+/** LED info board faces, 4 rows of 8:1 cells. */
+export function vmsAtlas() {
+  const W = 1024, H = 512, c = canvas(W, H), x = c.getContext('2d');
+  const jp = canDrawJapanese();
+  // draw the messages, then keep only a grid of round LED dots
+  const t = canvas(W, H), y = t.getContext('2d');
+  y.textBaseline = 'middle';
+  VMS.forEach((m, i) => {
+    const cy = i * 128 + 64;
+    const [a, b] = jp ? m.jp : m.en;
+    y.fillStyle = m.col;
+    y.font = `bold ${jp ? 74 : 66}px ${jp ? JP_FONT : EN_FONT}`;
+    y.textAlign = 'left'; fitText(y, a, 40, cy, 450);
+    y.textAlign = 'right'; fitText(y, b, W - 40, cy, 450);
+  });
+  const dots = canvas(6, 6), d = dots.getContext('2d');
+  d.fillStyle = '#fff'; d.beginPath(); d.arc(3, 3, 2.3, 0, Math.PI * 2); d.fill();
+  y.globalCompositeOperation = 'destination-in';
+  y.fillStyle = y.createPattern(dots, 'repeat');
+  y.fillRect(0, 0, W, H);
+  x.fillStyle = '#060607'; x.fillRect(0, 0, W, H);
+  // unlit dots, faintly visible
+  x.fillStyle = x.createPattern(dots, 'repeat'); x.globalAlpha = 0.05; x.fillRect(0, 0, W, H); x.globalAlpha = 1;
+  x.drawImage(t, 0, 0);
+  // a glow pass so the characters bloom a little even without post-processing
+  x.globalCompositeOperation = 'lighter'; x.filter = 'blur(3px)'; x.globalAlpha = 0.5; x.drawImage(t, 0, 0);
+  x.filter = 'none'; x.globalAlpha = 1; x.globalCompositeOperation = 'source-over';
+  // frame lines between rows
+  x.fillStyle = '#1a1b1e';
+  for (let i = 0; i <= 4; i++) x.fillRect(0, i * 128 - 2, W, 4);
   return tex(c);
 }
 
