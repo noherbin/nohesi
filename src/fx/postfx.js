@@ -174,7 +174,7 @@ const SpeedShader = {
           float seg = fract(d * (0.7 + r2 * 0.8) - time * (1.2 + r1 * 1.6) + r2 * 9.0);
           float dash = smoothstep(0.0, 0.06, seg) * (1.0 - smoothstep(0.18 + r2 * 0.2, 0.42 + r2 * 0.25, seg));
           float m = smoothstep(0.42 + r2 * 0.15, 0.98, d);
-          col.rgb += lineTint * (thin * dash * m * lines * (0.12 + 0.28 * r2));
+          col.rgb += lineTint * (thin * dash * m * lines * (0.08 + 0.2 * r2));
         }
       }
       gl_FragColor = col;
@@ -345,13 +345,13 @@ export class PostFX {
     const n = g.night, gold = g.golden, wet = g.wet;
     const dt = g.dt ?? 0.016;
     const p = this.pulseA;
-    this.pulseA = Math.max(0, p - dt * (1.6 + p * 2.5));
+    this.pulseA = Math.max(0, p - dt * (2.2 + p * 2.5));
     const su = this.speedPass.uniforms;
-    su.strength.value = this._blur + p * 0.018;
-    su.fringe.value = this._fringe + p * 0.0065;
+    su.strength.value = this._blur + p * 0.006;
+    su.fringe.value = this._fringe + p * 0.0025;
     su.time.value = g.time;
     u.contrast.value = 1.11 + gold * 0.05 - wet * 0.03 + n * 0.02;
-    u.saturation.value = 1.2 + gold * 0.1 - n * 0.02 - wet * 0.12 + p * 0.25;
+    u.saturation.value = 1.2 + gold * 0.1 - n * 0.02 - wet * 0.12 + p * 0.1;
     // cool blue shadows at night/rain, teal-ish by day; warm highlights at golden hour
     u.shadowTint.value.setRGB(-0.004 - n * 0.004, 0.006 + n * 0.004, 0.022 + n * 0.03 + wet * 0.01);
     u.highTint.value.setRGB(0.018 + gold * 0.05, 0.008 + gold * 0.016, -0.01 - gold * 0.03 + n * 0.02);
@@ -367,7 +367,7 @@ export class PostFX {
     if (this.bloomOn) {
       // a soft glow on every light, much stronger after dark; wet nights glow most
       const b = g.bloom ?? 1;
-      this.bloomPass.strength = (g.bloomStrength ?? (0.24 + n * 0.38 + wet * 0.08)) * b + p * 0.12;
+      this.bloomPass.strength = (g.bloomStrength ?? (0.24 + n * 0.38 + wet * 0.08)) * b + p * 0.05;
       this.bloomPass.threshold = g.bloomThreshold ?? (1.0 - n * 0.22);
       this.bloomPass.materialHighPassFilter.uniforms.bloomMax.value = g.bloomMax ?? 5;
       this.bloomPass.radius = g.bloomRadius ?? (0.5 + n * 0.12);

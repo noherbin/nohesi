@@ -5,8 +5,8 @@ import * as THREE from 'three';
 import { smoothstep } from '../core/utils.js';
 
 const N = 48; // points per ribbon
-const LIFE = 0.16; // seconds a point lives
-const MAX_LEN = 6.5; // metres
+const LIFE = 0.09; // seconds a point lives
+const MAX_LEN = 3; // metres
 
 function profileTexture() {
   const c = document.createElement('canvas');
@@ -123,7 +123,7 @@ export class LightTrails {
   _build(cam, intensity, brake) {
     const P = this.pos, C = this.col, t = this._t, c = this._c, s = this._s;
     let any = false;
-    const glow = intensity * (1 + brake * 1.2);
+    const glow = intensity * (1 + brake * 0.6);
     for (let r = 0; r < 2; r++) {
       const pts = this.rib[r].pts;
       const n = pts.length;
@@ -151,16 +151,16 @@ export class LightTrails {
         if (i > 0) dist += Math.hypot(q.x - pts[i - 1].x, q.z - pts[i - 1].z);
         const f = Math.min(1, Math.max(dist / MAX_LEN, q.age / LIFE, i === n - 1 ? 1 : 0));
         const fade = (1 - f) * (1 - f) * (1 - f);
-        const w = 0.055 * (1 - 0.6 * f) * (1 + brake * 0.35);
+        const w = 0.03 * (1 - 0.6 * f) * (1 + brake * 0.25);
         const k = glow * fade;
         for (let side = 0; side < 2; side++) {
           const sg = side ? w : -w;
           P[(v + side) * 3] = q.x + s.x * sg;
           P[(v + side) * 3 + 1] = q.y + s.y * sg;
           P[(v + side) * 3 + 2] = q.z + s.z * sg;
-          C[(v + side) * 3] = 1.9 * k;
-          C[(v + side) * 3 + 1] = 0.1 * k + 0.25 * k * k;
-          C[(v + side) * 3 + 2] = 0.07 * k + 0.12 * k * k;
+          C[(v + side) * 3] = 0.75 * k;
+          C[(v + side) * 3 + 1] = 0.04 * k;
+          C[(v + side) * 3 + 2] = 0.03 * k;
         }
       }
     }

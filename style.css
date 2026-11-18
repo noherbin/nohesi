@@ -301,7 +301,7 @@ input[type=range]::-moz-range-thumb { width: 12px; height: 12px; border-radius: 
 .score.bump { animation: bump 0.3s cubic-bezier(.2, .9, .3, 1.4); }
 .score.big { animation: bumpBig 0.55s cubic-bezier(.2, .9, .3, 1.3); }
 @keyframes bump { 35% { transform: scale(1.12); color: #fff; text-shadow: 0 0 26px rgba(255, 214, 120, 0.9), 0 2px 16px rgba(0,0,0,0.6); } }
-@keyframes bumpBig { 25% { transform: scale(1.26) skewX(-8deg); color: #fff; text-shadow: -3px 0 rgba(0, 240, 255, 0.6), 3px 0 rgba(255, 46, 77, 0.8), 0 0 34px rgba(255, 46, 77, 0.9); } 55% { transform: scale(0.97); } }
+@keyframes bumpBig { 25% { transform: scale(1.14) skewX(-4deg); color: #fff; text-shadow: -3px 0 rgba(0, 240, 255, 0.6), 3px 0 rgba(255, 46, 77, 0.8), 0 0 34px rgba(255, 46, 77, 0.9); } 55% { transform: scale(0.97); } }
 .hud-score[data-tier="2"] .score { text-shadow: 0 0 22px rgba(255, 140, 40, 0.35), 0 2px 16px rgba(0,0,0,0.6); }
 .hud-score[data-tier="3"] .score { text-shadow: 0 0 26px rgba(255, 46, 77, 0.5), 0 2px 16px rgba(0,0,0,0.6); }
 .hud-score[data-tier="4"] .score { text-shadow: 0 0 30px rgba(255, 60, 140, 0.6), 0 0 8px rgba(255, 255, 255, 0.5), 0 2px 16px rgba(0,0,0,0.6); }
@@ -327,9 +327,9 @@ input[type=range]::-moz-range-thumb { width: 12px; height: 12px; border-radius: 
 
 /* edge light when you thread past a car: coloured by the pass, strongest on the side you passed */
 .h-edge { position: absolute; inset: 0; pointer-events: none; opacity: 0; mix-blend-mode: screen; --ec: 242, 194, 48;
-  background: radial-gradient(ellipse 80% 75% at 50% 46%, transparent 56%, rgba(var(--ec), 0.4) 100%); }
-.h-edge.l { background: linear-gradient(90deg, rgba(var(--ec), 0.55), transparent 24%), radial-gradient(ellipse 80% 75% at 50% 46%, transparent 60%, rgba(var(--ec), 0.25) 100%); }
-.h-edge.r { background: linear-gradient(270deg, rgba(var(--ec), 0.55), transparent 24%), radial-gradient(ellipse 80% 75% at 50% 46%, transparent 60%, rgba(var(--ec), 0.25) 100%); }
+  background: radial-gradient(ellipse 80% 75% at 50% 46%, transparent 62%, rgba(var(--ec), 0.18) 100%); }
+.h-edge.l { background: linear-gradient(90deg, rgba(var(--ec), 0.28), transparent 16%); }
+.h-edge.r { background: linear-gradient(270deg, rgba(var(--ec), 0.28), transparent 16%); }
 .h-edge.on { animation: edgeFlash 0.55s ease-out forwards; }
 .h-edge.xclose { --ec: 255, 46, 77; }
 .h-edge.xclose.on { animation-duration: 0.8s; }
@@ -357,9 +357,9 @@ input[type=range]::-moz-range-thumb { width: 12px; height: 12px; border-radius: 
 .pop.bad { --pc: 255, 120, 120; font-size: 22px; animation-name: popBad; }
 .pop.bad::before { display: none; }
 @keyframes popSlam {
-  0% { opacity: 0; transform: scale(1.9) skewX(-14deg); filter: blur(6px); letter-spacing: 14px; }
-  9% { opacity: 1; transform: scale(0.94) skewX(-5deg); filter: blur(0); letter-spacing: 1px; }
-  16% { transform: scale(1.05); }
+  0% { opacity: 0; transform: scale(1.35) skewX(-8deg); filter: blur(3px); letter-spacing: 6px; }
+  9% { opacity: 1; transform: scale(0.97) skewX(-3deg); filter: blur(0); letter-spacing: 1px; }
+  16% { transform: scale(1.02); }
   24% { transform: none; }
   78% { opacity: 1; transform: none; }
   100% { opacity: 0; transform: translateY(-18px) scale(0.96); }
@@ -367,7 +367,7 @@ input[type=range]::-moz-range-thumb { width: 12px; height: 12px; border-radius: 
 @keyframes popBad { 0% { opacity: 0; transform: translateX(0); } 6% { opacity: 1; transform: translateX(-10px); } 12% { transform: translateX(9px); } 18% { transform: translateX(-6px); } 24% { transform: none; } 78% { opacity: 1; } 100% { opacity: 0; transform: translateY(10px); } }
 @keyframes popSweep { 0% { transform: skewX(-24deg) scaleX(0); opacity: 1; } 35% { transform: skewX(-24deg) scaleX(1); opacity: 1; } 100% { transform: skewX(-24deg) scaleX(1.1); opacity: 0; } }
 @keyframes popPts { from { opacity: 0; transform: translateX(-14px) scale(0.4); } to { opacity: 1; transform: none; } }
-@keyframes popGlitch { 0% { transform: translate(-3px, 1px); } 50% { transform: translate(3px, -1px) skewX(-8deg); } 100% { transform: none; } }
+@keyframes popGlitch { 0% { transform: translate(-1px, 0); } 50% { transform: translate(1px, 0) skewX(-4deg); } 100% { transform: none; } }
 @keyframes popShine { from { background-position: 100% 0; } to { background-position: 0 0; } }
 .banner { position: absolute; left: 50%; top: 38%; transform: translate(-50%, -50%); text-align: center; opacity: 0; transition: opacity 0.25s; }
 .banner.show { opacity: 1; }

@@ -751,12 +751,12 @@ export class Game {
 
   /** screen punch for scoring moments: chromatic pulse, FOV kick and a burst of speed lines */
   _eventFx(ev) {
-    const k = { xclose: 0.95, close: 0.45, hsover: 0.28, split: 1.15, chain: 1.1, streak: 0.8, bad: 0.55 }[ev.kind] || 0;
+    const k = { xclose: 0.7, close: 0.3, hsover: 0.15, split: 0.9, chain: 0.9, streak: 0.5, bad: 0.4 }[ev.kind] || 0;
     if (!k) return;
     this.postfx.pulse(k);
-    if (ev.kind !== 'bad') {
-      this.camRig.addKick(k * (0.4 + 0.6 * Math.min(1, this.S.shake ?? 1)));
-      this.lineBurst = Math.max(this.lineBurst || 0, k);
+    if (ev.kind === 'xclose' || ev.kind === 'split' || ev.kind === 'chain') {
+      this.camRig.addKick(k * Math.min(1, this.S.shake ?? 1));
+      this.lineBurst = Math.max(this.lineBurst || 0, k * 0.5);
     }
   }
 
@@ -1001,7 +1001,7 @@ export class Game {
     this._glows(H, inside);
     // tail-light trails once the lights are on (dusk, night, tunnels), from city speeds up
     const trailOn = !inside && this.camRig.mode !== 'hood' && this.camRig.mode !== 'bumper' && this.S.lightTrails !== false;
-    this.trails.update(dt, car, cam, trailOn ? car.headOn * smoothstep(12, 30, P.speed) : 0, car.brakeLight);
+    this.trails.update(dt, car, cam, trailOn ? car.headOn * smoothstep(25, 45, P.speed) : 0, car.brakeLight);
     // rain
     this.rain.update(dt, cam.position, this._tmpV.set(P.VX, 0, -P.VY), sky.rainAmt, 1 - night * 0.75);
     // cockpit

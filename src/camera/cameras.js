@@ -47,7 +47,7 @@ export class CameraRig {
   }
   _kickNow() {
     const t = this.kickT ?? 9, a = this.kickA ?? 0;
-    return a * (t < 0.07 ? t / 0.07 : Math.exp(-(t - 0.07) * 5.5));
+    return a * (t < 0.15 ? Math.sin((t / 0.15) * Math.PI * 0.5) : Math.exp(-(t - 0.15) * 3));
   }
   addBump(a) { this.bump = Math.min(0.06, this.bump + a); }
 
@@ -72,7 +72,7 @@ export class CameraRig {
     let fov = s.fov ?? 62;
     let near = 0.2;
     const shakeAmt = (s.shake ?? 1);
-    const speedShake = smoothstep(38, 95, speed) * 0.012 * shakeAmt;
+    const speedShake = smoothstep(45, 100, speed) * 0.006 * shakeAmt;
     this.impact = Math.max(0, this.impact - dt * 1.8);
     this.bump = Math.max(0, this.bump - dt * 0.25);
 
@@ -149,7 +149,7 @@ export class CameraRig {
     this.fovS = this.snap || this.fovS === undefined ? fov : damp(this.fovS, fov, 4, dt);
     this.kickT = (this.kickT ?? 9) + dt;
     const kickMul = mode === 'cinematic' ? 0 : mode === 'cockpit' || mode === 'hood' || mode === 'bumper' ? 0.45 : 1;
-    const fovT = this.fovS + this._kickNow() * 7 * kickMul;
+    const fovT = this.fovS + this._kickNow() * 2.2 * kickMul;
     if (Math.abs(cam.fov - fovT) > 0.01 || cam.near !== near) {
       cam.fov = fovT;
       cam.near = near;
