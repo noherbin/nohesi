@@ -147,7 +147,7 @@ export class Scoring {
       this.overtakes++;
       if (g < 2.0) this.nearMisses++;
     }
-    this.events.push({ text: T.label, pts, kind: type, dense: dense > 1.15 ? dense : 0, gap: g });
+    this.events.push({ text: T.label, pts, kind: type, dense: dense > 1.15 ? dense : 0, gap: g, side: c.side });
     this.sounds.push({ type: 'chime', level: Math.min(12, (this.mult - 1) * 2) + (type === 'xclose' ? 4 : 0) });
     // split: passed cars on both sides within a short window
     if (g < 1.6) {

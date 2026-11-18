@@ -171,12 +171,12 @@ export class PlayerCar {
     this.brakeLight = damp(this.brakeLight, braking ? 1 : 0, 20, dt);
     const lit = smoothstep(0.15, 0.6, night + wet * 0.3);
     this.headOn = damp(this.headOn, lit, 3, dt);
-    m.mats.tail.emissiveIntensity = 0.35 + this.headOn * 0.9 + this.brakeLight * 3.2;
+    m.mats.tail.emissiveIntensity = 0.35 + this.headOn * 1.5 + this.brakeLight * 3.6;
     m.mats.head.emissiveIntensity = 0.02 + this.headOn * 2.4;
     m.mats.head2.emissiveIntensity = 0.02 + this.headOn * 3.2;
     m.mats.drl.emissiveIntensity = 1.1 + this.headOn * 0.9;
     if (m.mats.tailLed) {
-      m.mats.tailLed.emissiveIntensity = 1.0 + this.headOn * 1.4 + this.brakeLight * 4.5;
+      m.mats.tailLed.emissiveIntensity = 1.0 + this.headOn * 2.2 + this.brakeLight * 5.0;
       m.mats.proj.emissiveIntensity = 0.03 + this.headOn * 3.2;
       m.mats.refl.emissiveIntensity = this.headOn * 0.35;
     }

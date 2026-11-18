@@ -177,18 +177,19 @@ export class UI {
     const mc = $('mode-cards');
     mc.innerHTML = '';
     for (const m of MODES) {
-      const c = h('button', 'card' + (last.mode === m.id ? ' sel' : ''), `<div class="c-t">${m.name}</div><div class="c-d">${m.desc}</div>`);
-      c.onclick = () => { last.mode = m.id; g.audio.click(); this.renderSetup(); };
+      const c = h('button', 'card' + (last.mode === m.id ? ' sel' : '') + (this._picked === 'm' + m.id ? ' pick' : ''), `<div class="c-t">${m.name}</div><div class="c-d">${m.desc}</div>`);
+      c.onclick = () => { last.mode = m.id; g.audio.click(); this._picked = 'm' + m.id; this.renderSetup(); };
       mc.appendChild(c);
     }
     const ec = $('env-cards');
     ec.innerHTML = '';
     for (const id of ENV_ORDER) {
       const e = ENVIRONMENTS[id];
-      const c = h('button', 'card' + (last.env === id ? ' sel' : ''), `<div class="swatch" style="background:${ENV_COLORS[id]}"></div><div class="c-t">${e.name}</div><div class="c-d">${e.desc}</div>`);
-      c.onclick = () => { last.env = id; g.audio.click(); this.renderSetup(); g.previewEnv(id); };
+      const c = h('button', 'card' + (last.env === id ? ' sel' : '') + (this._picked === 'e' + id ? ' pick' : ''), `<div class="swatch" style="background:${ENV_COLORS[id]}"></div><div class="c-t">${e.name}</div><div class="c-d">${e.desc}</div>`);
+      c.onclick = () => { last.env = id; g.audio.click(); this._picked = 'e' + id; this.renderSetup(); g.previewEnv(id); };
       ec.appendChild(c);
     }
+    this._picked = null;
     const chips = (el, list, key) => {
       el.innerHTML = '';
       for (const it of list) {
@@ -543,6 +544,8 @@ export class UI {
     row(gr, 'Quality', seg('quality', [['low', 'LOW'], ['medium', 'MED'], ['high', 'HIGH'], ['ultra', 'ULTRA']]));
     row(gr, 'Auto-adjust for smooth framerate', toggle('autoQuality'));
     row(gr, 'Motion blur', toggle('motionBlur'));
+    row(gr, 'Speed lines', toggle('speedLines'));
+    row(gr, 'Light trails', toggle('lightTrails'));
     row(gr, 'Camera shake', slider('shake', 0, 1.5, 0.05, pct));
     row(gr, 'Chase camera FOV', slider('fov', 50, 80, 1));
     row(gr, 'Cockpit FOV', slider('cockpitFov', 55, 90, 1));
@@ -594,7 +597,21 @@ export class UI {
   showResults(r) {
     $('r-kicker').textContent = r.kicker || '';
     $('r-title').textContent = r.title;
-    $('r-big').textContent = r.big || '';
+    // the headline number counts up
+    const big = $('r-big'), txt = String(r.big || '');
+    cancelAnimationFrame(this._countRaf);
+    if (/^[\d,]+$/.test(txt) && txt.length > 1 && !matchMedia('(prefers-reduced-motion: reduce)').matches) {
+      const to = Number(txt.replace(/,/g, '')), t0 = performance.now(), dur = 1100;
+      const tick = (now) => {
+        const k = Math.min(1, (now - t0 - 250) / dur);
+        const e = k <= 0 ? 0 : 1 - Math.pow(1 - k, 3);
+        big.textContent = Math.round(to * e).toLocaleString('en-US');
+        if (k < 1) this._countRaf = requestAnimationFrame(tick);
+        else { big.textContent = txt; big.classList.remove('land'); void big.offsetWidth; big.classList.add('land'); }
+      };
+      big.textContent = '0';
+      this._countRaf = requestAnimationFrame(tick);
+    } else big.textContent = txt;
     $('r-stats').innerHTML = (r.stats || []).map(([k, v]) => `<div><span>${k}</span><b>${v}</b></div>`).join('');
     $('r-note').textContent = r.note || '';
     $('r-retry').textContent = r.retryLabel || 'RETRY';

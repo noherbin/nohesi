@@ -11,6 +11,7 @@ import { CameraRig, CAM_MODES, CAM_NAMES } from './camera/cameras.js';
 import { Cockpit } from './camera/cockpit.js';
 import { Glows, Particles, Rain } from './fx/effects.js';
 import { PostFX } from './fx/postfx.js';
+import { LightTrails } from './fx/trails.js';
 import { radialTexture } from './world/textures.js';
 import { AudioSystem } from './audio/audio.js';
 import { Input } from './core/input.js';
@@ -106,6 +107,7 @@ export class Game {
     this.camRig = new CameraRig(this.camera);
     this.cockpit = new Cockpit(renderer);
     this.glows = new Glows(this.scene);
+    this.trails = new LightTrails(this.scene);
     this.smoke = new Particles(this.scene, 260, { texture: radialTexture(64, 0.0, 1.2), depthBias: 0.35 });
     this.sparks = new Particles(this.scene, 220, { additive: true, texture: radialTexture(32, 0.2, 1.5) });
     this.flames = new Particles(this.scene, 120, { additive: true, texture: radialTexture(32, 0.1, 1.3) });
@@ -354,6 +356,7 @@ export class Game {
     this.scoring.reset();
     this.autopilot.reset(lane, 88 + Math.random() * 10);
     this.smoke.clear(); this.spray?.clear();
+    this.trails.clear();
     this.sparks.clear();
     this.flames.clear();
     this.popQueue.length = 0;
@@ -720,7 +723,7 @@ export class Game {
     if (ds > 0 && ds < 50) this.scoring.addDistance(ds);
     this.lastS = pr.s;
     // events: sounds & HUD popups
-    for (const ev of this.scoring.events) if (!attract) this.hud.pop(ev);
+    for (const ev of this.scoring.events) if (!attract) { this.hud.pop(ev); this._eventFx(ev); }
     this.scoring.events.length = 0;
     for (const s of this.scoring.sounds) {
       if (s.type === 'whoosh') this.audio.whoosh(s.side, s.intensity * (attract ? 0.4 : 1), s.rel);
@@ -744,6 +747,17 @@ export class Game {
       this.stuckT += dt;
       if (this.stuckT > 2.5) { this.stuckT = -20; this.hud.hint('Stuck? Press <kbd>R</kbd> to reset your car onto the road.', 5); }
     } else if (this.stuckT > 0) this.stuckT = 0;
+  }
+
+  /** screen punch for scoring moments: chromatic pulse, FOV kick and a burst of speed lines */
+  _eventFx(ev) {
+    const k = { xclose: 0.95, close: 0.45, hsover: 0.28, split: 1.15, chain: 1.1, streak: 0.8, bad: 0.55 }[ev.kind] || 0;
+    if (!k) return;
+    this.postfx.pulse(k);
+    if (ev.kind !== 'bad') {
+      this.camRig.addKick(k * (0.4 + 0.6 * Math.min(1, this.S.shake ?? 1)));
+      this.lineBurst = Math.max(this.lineBurst || 0, k);
+    }
   }
 
   _impact(sev, point, wall, attract) {
@@ -924,6 +938,7 @@ export class Game {
     this.camera.position.x += dx; this.camera.position.z += dz;
     this.camRig.cine.pos.x += dx; this.camRig.cine.pos.z += dz;
     for (const ps of [this.smoke, this.sparks, this.flames, this.spray]) for (const q of ps.p) if (q.life > 0) { q.x += dx; q.z += dz; }
+    this.trails.shift(dx, dz);
   }
 
   /* ---------------------------------------------------------------- render */
@@ -984,6 +999,9 @@ export class Game {
     this.flames.update(dt, cam, H);
     // glows
     this._glows(H, inside);
+    // tail-light trails once the lights are on (dusk, night, tunnels), from city speeds up
+    const trailOn = !inside && this.camRig.mode !== 'hood' && this.camRig.mode !== 'bumper' && this.S.lightTrails !== false;
+    this.trails.update(dt, car, cam, trailOn ? car.headOn * smoothstep(12, 30, P.speed) : 0, car.brakeLight);
     // rain
     this.rain.update(dt, cam.position, this._tmpV.set(P.VX, 0, -P.VY), sky.rainAmt, 1 - night * 0.75);
     // cockpit
@@ -1005,15 +1023,19 @@ export class Game {
     if (this.state === 'playing') this._updateHud(dt);
     // post & render
     const speedBlur = this.S.motionBlur ? smoothstep(28, 100, P.speed) * (inside ? 0.55 : 1) * (camMode === 'cinematic' ? 0.4 : 1) : 0;
+    // speed lines from about 95 mph, plus a burst on big moments
+    this.lineBurst = Math.max(0, (this.lineBurst || 0) - dt * 1.4);
+    const lines = this.S.speedLines !== false && camMode !== 'cinematic' && this.state !== 'menu'
+      ? Math.min(1, smoothstep(42, 80, P.speed) * 0.75 + this.lineBurst * smoothstep(20, 40, P.speed)) * (inside ? 0.4 : 1) : 0;
     if (this.Q.post) {
       this.postfx.setScene(this.scene, cam);
-      this.postfx.set(speedBlur, inside ? 0.3 : 0.38, speedBlur * 0.0025);
+      this.postfx.set(speedBlur, inside ? 0.3 : 0.4 + smoothstep(40, 85, P.speed) * 0.12, speedBlur * 0.0025, lines);
       const sunNdc = this._sunNdc || (this._sunNdc = new THREE.Vector3());
       sunNdc.copy(sky.sunDir).multiplyScalar(2000).add(cam.position).project(cam);
       // behind-camera or below-horizon suns get no flare
       const sunFront = sky.sunDir.dot(cam.getWorldDirection(this._tmpV2 || (this._tmpV2 = new THREE.Vector3()))) > 0;
       this.postfx.look({
-        night, golden: sky.golden, wet, time: (this._lookT = ((this._lookT || 0) + dt) % 1000),
+        night, golden: sky.golden, wet, dt, time: (this._lookT = ((this._lookT || 0) + dt) % 1000),
         sunNdc: sunFront ? sunNdc : null, sunColor: sky.sun.color,
         flare: (1 - night) * (1 - sky.overcast) * smoothstep(-1, 4, sky.elevation) * (inside ? 0.7 : 1),
       });
@@ -1122,7 +1144,8 @@ export class Game {
         }
       }
     }
-    G.end(cam, H);
+    // anamorphic flares through the brightest lights: strong after dark, faint by day
+    G.end(cam, H, (0.12 + 0.88 * smoothstep(0.1, 0.7, night)) * (inside ? 0.6 : 1), this._sz.x);
   }
 
   _updateHud(dt) {
@@ -1203,7 +1226,24 @@ export class Game {
     // portraits first, at the normal exposure; the garage itself flashes brighter during install effects
     // car portraits for the garage list, one per frame, drawn before (and then under) the frame itself
     if (this.ui.screen === 'garage' && this.thumbs.busy) this.thumbs.pump();
+    this._renderGarage(dt);
+  }
+
+  _renderGarage(dt) {
+    const g = this.garage;
     this.renderer.toneMappingExposure = 0.9 + g.exposureBoost;
-    g.render(this.renderer);
+    if (this.Q.post) {
+      // the showroom gets the same glow as the road: lamps, neon and install flashes bloom and streak
+      const pf = this.postfx;
+      pf.setScene(g.scene, g.camera);
+      pf.set(0, 0.42, 0, 0);
+      pf.look({
+        night: 0.35, golden: 0, wet: 0, dt, time: (this._lookT = ((this._lookT || 0) + dt) % 1000),
+        sunNdc: null, sunColor: this.sky.sun.color, flare: 0, bloom: 1, bloomStrength: 0.32, bloomThreshold: 3.5, bloomMax: 1.5, bloomRadius: 0.12,
+        // studio spots on clearcoat run far past white, so only the install flashes get light streaks
+        streaks: g.exposureBoost * 0.3, streakThreshold: 8,
+      });
+      pf.render();
+    } else g.render(this.renderer);
   }
 }

@@ -5,6 +5,8 @@ export const DEFAULT_SETTINGS = {
   quality: 'high',
   autoQuality: true,
   motionBlur: true,
+  speedLines: true,
+  lightTrails: true,
   shake: 1,
   fov: 62,
   cockpitFov: 68,

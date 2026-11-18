@@ -22,6 +22,36 @@ void main(){
   gl_FragColor = vec4(vColor * a, a);
 }`;
 
+// Anamorphic flares: a thin horizontal line through each bright light, drawn as one screen-aligned quad per glow
+// (instanced over the glow buffers). Only the strongest lights reach full length.
+const STREAK_VERT = /* glsl */ `
+attribute vec2 corner;
+attribute vec3 iPos;
+attribute vec3 iCol;
+attribute float iSize;
+uniform float scale; uniform vec2 viewport; uniform float strength; uniform float len;
+varying vec3 vC; varying vec2 vUv;
+void main(){
+  vec4 mv = modelViewMatrix * vec4(iPos, 1.0);
+  vec4 clip = projectionMatrix * mv;
+  float peak = max(iCol.r, max(iCol.g, iCol.b));
+  float k = smoothstep(0.22, 0.9, peak) * strength;
+  float px = iSize * scale / max(-mv.z, 0.1);
+  float w = clamp(px * len * (0.5 + k), 0.0, viewport.x * 0.45) * step(0.004, k);
+  float h = clamp(px * 0.06, 1.0, 5.0);
+  gl_Position = clip + vec4(corner * vec2(w, h) / (viewport * 0.5) * clip.w, 0.0, 0.0);
+  float l = dot(iCol, vec3(0.3, 0.5, 0.2));
+  vC = mix(iCol, l * vec3(0.55, 0.75, 1.15), 0.4) * k;
+  vUv = corner;
+}`;
+const STREAK_FRAG = /* glsl */ `
+varying vec3 vC; varying vec2 vUv;
+void main(){
+  float x = 1.0 - abs(vUv.x);
+  float a = x * x * x * exp(-vUv.y * vUv.y * 3.5);
+  gl_FragColor = vec4(vC * a, a);
+}`;
+
 export class Glows {
   constructor(scene, max = 900) {
     this.max = max;
@@ -41,6 +71,23 @@ export class Glows {
     this.points.frustumCulled = false;
     this.points.renderOrder = 5;
     scene.add(this.points);
+    // flares share the glow buffers
+    const sg = new THREE.InstancedBufferGeometry();
+    sg.setAttribute('corner', new THREE.BufferAttribute(new Float32Array([-1, -1, 1, -1, 1, 1, -1, 1]), 2));
+    sg.setIndex([0, 1, 2, 0, 2, 3]);
+    sg.setAttribute('iPos', new THREE.InstancedBufferAttribute(this.pos, 3).setUsage(THREE.DynamicDrawUsage));
+    sg.setAttribute('iCol', new THREE.InstancedBufferAttribute(this.col, 3).setUsage(THREE.DynamicDrawUsage));
+    sg.setAttribute('iSize', new THREE.InstancedBufferAttribute(this.size, 1).setUsage(THREE.DynamicDrawUsage));
+    sg.instanceCount = 0;
+    this.streakMat = new THREE.ShaderMaterial({
+      vertexShader: STREAK_VERT, fragmentShader: STREAK_FRAG,
+      uniforms: { scale: { value: 600 }, viewport: { value: new THREE.Vector2(1280, 720) }, strength: { value: 0 }, len: { value: 6 } },
+      transparent: true, depthWrite: false, blending: THREE.AdditiveBlending,
+    });
+    this.streaks = new THREE.Mesh(sg, this.streakMat);
+    this.streaks.frustumCulled = false;
+    this.streaks.renderOrder = 6;
+    scene.add(this.streaks);
     this.n = 0;
   }
   begin() { this.n = 0; }
@@ -51,14 +98,26 @@ export class Glows {
     this.col[i * 3] = r; this.col[i * 3 + 1] = g; this.col[i * 3 + 2] = b;
     this.size[i] = size;
   }
-  end(camera, height) {
+  /** streak: 0..1 flare strength (night), width: viewport width in px */
+  end(camera, height, streak = 0, width = height * 1.78) {
     const g = this.points.geometry;
     g.setDrawRange(0, this.n);
     g.attributes.position.needsUpdate = true;
     g.attributes.color.needsUpdate = true;
     g.attributes.size.needsUpdate = true;
     // projection scale so `size` is in world metres
-    this.mat.uniforms.scale.value = height / (2 * Math.tan((camera.fov * Math.PI) / 360));
+    const sc = height / (2 * Math.tan((camera.fov * Math.PI) / 360));
+    this.mat.uniforms.scale.value = sc;
+    const sg = this.streaks.geometry;
+    this.streaks.visible = streak > 0.01 && this.n > 0;
+    sg.instanceCount = this.n;
+    sg.attributes.iPos.needsUpdate = true;
+    sg.attributes.iCol.needsUpdate = true;
+    sg.attributes.iSize.needsUpdate = true;
+    const u = this.streakMat.uniforms;
+    u.scale.value = sc;
+    u.strength.value = streak;
+    u.viewport.value.set(width, height);
   }
 }
 

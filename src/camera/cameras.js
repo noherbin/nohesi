@@ -39,6 +39,16 @@ export class CameraRig {
   }
 
   addImpact(a) { this.impact = Math.min(1.5, this.impact + a); }
+  /** a quick FOV punch for big moments (near misses, chains): 0..1.2 */
+  addKick(a) {
+    const cur = this._kickNow();
+    this.kickA = Math.min(1.4, Math.max(a, cur + a * 0.4));
+    this.kickT = 0;
+  }
+  _kickNow() {
+    const t = this.kickT ?? 9, a = this.kickA ?? 0;
+    return a * (t < 0.07 ? t / 0.07 : Math.exp(-(t - 0.07) * 5.5));
+  }
   addBump(a) { this.bump = Math.min(0.06, this.bump + a); }
 
   /**
@@ -136,8 +146,12 @@ export class CameraRig {
     cam.position.y = Math.max(cam.position.y, carPos.y + 0.18);
     cam.lookAt(this.look);
     if (this.impact > 0.05) cam.rotateZ(noise1(this.t * 17, 4) * this.impact * 0.03 * shakeAmt);
-    if (Math.abs(cam.fov - fov) > 0.01 || cam.near !== near) {
-      cam.fov = this.snap ? fov : damp(cam.fov, fov, 4, dt);
+    this.fovS = this.snap || this.fovS === undefined ? fov : damp(this.fovS, fov, 4, dt);
+    this.kickT = (this.kickT ?? 9) + dt;
+    const kickMul = mode === 'cinematic' ? 0 : mode === 'cockpit' || mode === 'hood' || mode === 'bumper' ? 0.45 : 1;
+    const fovT = this.fovS + this._kickNow() * 7 * kickMul;
+    if (Math.abs(cam.fov - fovT) > 0.01 || cam.near !== near) {
+      cam.fov = fovT;
       cam.near = near;
       cam.updateProjectionMatrix();
     }

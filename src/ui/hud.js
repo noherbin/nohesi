@@ -17,7 +17,7 @@ export class HUD {
   constructor() {
     this.el = $('hud');
     this.e = {};
-    for (const id of ['h-score', 'h-mult', 'h-combo', 'h-best', 'h-dist', 'h-dist-l', 'h-near', 'h-gear', 'h-speed', 'h-unit', 'h-boost', 'h-mode', 'h-timer', 'h-obj', 'h-obj-t', 'h-obj-fill', 'h-pops', 'h-banner', 'h-cam', 'h-hint', 'h-scorebox', 'g-rpm', 'g-red', 'g-track']) this.e[id] = $(id);
+    for (const id of ['h-score', 'h-mult', 'h-combo', 'h-best', 'h-dist', 'h-dist-l', 'h-near', 'h-gear', 'h-speed', 'h-unit', 'h-boost', 'h-mode', 'h-timer', 'h-obj', 'h-obj-t', 'h-obj-fill', 'h-pops', 'h-banner', 'h-cam', 'h-hint', 'h-scorebox', 'g-rpm', 'g-red', 'g-track', 'h-edge', 'h-combo-w', 'h-cluster']) this.e[id] = $(id);
     this.e['g-track'].setAttribute('d', arcPath(0, 1));
     this.e['g-rpm'].setAttribute('d', arcPath(0, 1));
     this.e['g-rpm'].style.strokeDasharray = `${LEN} ${LEN}`;
@@ -63,15 +63,32 @@ export class HUD {
     const hot = d.rpm > d.redline * 0.96;
     if (this.last.hot !== hot) { this.last.hot = hot; this.e['g-rpm'].classList.toggle('hot', hot); }
     this.e['h-boost'].style.width = `${Math.round(clamp(d.boost, 0, 1) * 100)}%`;
+    // gear changes flash the cluster; the speed readout heats up with speed
+    const gear = d.gear;
+    if (this.last.gearN !== undefined && this.last.gearN !== gear) this._kick(this.e['h-cluster'], gear > this.last.gearN ? 'shift-up' : 'shift-dn');
+    this.last.gearN = gear;
+    const heat = Math.round(clamp((d.speed * MS_TO_MPH - 80) / 90, 0, 1) * 10) / 10;
+    if (this.last.heat !== heat) { this.last.heat = heat; this.e['h-cluster'].style.setProperty('--heat', heat); }
     if (d.scoring) {
       const sc = formatInt(d.score);
       if (this.last['h-score'] !== sc) {
         this._set('h-score', sc);
       }
       this._set('h-mult', `×${d.mult.toFixed(1)}`);
-      const hotM = d.mult >= 3;
-      if (this.last.hotM !== hotM) { this.last.hotM = hotM; this.e['h-mult'].classList.toggle('hot', hotM); }
-      this.e['h-combo'].style.width = `${Math.round(clamp(d.combo / 7, 0, 1) * 100)}%`;
+      // multiplier heat tiers: gold -> orange -> red -> white-hot
+      const tier = d.mult >= 8 ? 4 : d.mult >= 5 ? 3 : d.mult >= 3 ? 2 : d.mult >= 2 ? 1 : 0;
+      if (this.last.tier !== tier) {
+        const up = this.last.tier !== undefined && tier > this.last.tier;
+        this.last.tier = tier;
+        const m = this.e['h-mult'];
+        m.className = 'mult t' + tier;
+        this.e['h-scorebox'].dataset.tier = tier;
+        if (up) this._kick(m, 'up');
+      }
+      const cf = clamp(d.combo / 7, 0, 1);
+      this.e['h-combo'].style.width = `${Math.round(cf * 100)}%`;
+      const low = cf > 0 && cf < 0.28 && d.mult > 1;
+      if (this.last.comboLow !== low) { this.last.comboLow = low; this.e['h-combo-w'].classList.toggle('low', low); }
       this._set('h-near', String(d.nearMisses));
     }
     if (d.best !== undefined) this._set('h-best', formatInt(d.best));
@@ -100,30 +117,51 @@ export class HUD {
     }
   }
 
-  bumpScore() {
+  bumpScore(kind) {
     const el = this.e['h-score'];
-    el.classList.remove('bump');
+    el.classList.remove('bump', 'big');
     void el.offsetWidth;
     el.classList.add('bump');
+    if (kind === 'xclose' || kind === 'split' || kind === 'chain' || kind === 'streak') el.classList.add('big');
+  }
+
+  /** restart a one-shot CSS animation class on an element */
+  _kick(el, cls) {
+    el.classList.remove(cls);
+    void el.offsetWidth;
+    el.classList.add(cls);
+    clearTimeout(el['_k' + cls]);
+    el['_k' + cls] = setTimeout(() => el.classList.remove(cls), 900);
   }
 
   pop(ev) {
     const box = this.e['h-pops'];
     const p = document.createElement('div');
     p.className = 'pop ' + ev.kind;
-    let html = ev.text;
+    let html = `<span class="p-t" data-t="${ev.text}">${ev.text}</span>`;
     if (ev.pts) html += `<span class="p-pts">+${formatInt(ev.pts)}</span>`;
     if (ev.dense) html += `<span class="p-tag">DENSE ×${ev.dense.toFixed(1)}</span>`;
     p.innerHTML = html;
     box.prepend(p);
     while (box.children.length > 4) box.lastChild.remove();
-    setTimeout(() => p.remove(), 1550);
-    if (ev.pts) this.bumpScore();
+    setTimeout(() => p.remove(), 1650);
+    if (ev.pts) this.bumpScore(ev.kind);
+    if (ev.kind !== 'over') this.edge(ev.kind, ev.side);
+  }
+
+  /** coloured light at the screen edges, from the side the car passed on */
+  edge(kind, side) {
+    const el = this.e['h-edge'];
+    el.className = 'h-edge';
+    void el.offsetWidth;
+    el.className = `h-edge on ${kind} ${side < 0 ? 'l' : side > 0 ? 'r' : ''}`;
   }
 
   banner(kicker, title, sub, dur = 3) {
     const b = this.e['h-banner'];
     b.innerHTML = `<div class="b-k">${kicker}</div><div class="b-t">${title}</div>${sub ? `<div class="b-s">${sub}</div>` : ''}`;
+    b.classList.remove('show');
+    void b.offsetWidth;
     b.classList.add('show');
     this.bannerT = dur;
   }
